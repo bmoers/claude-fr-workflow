@@ -78,17 +78,23 @@ docs/                               user documentation
 
 - Load the working copy instead of a tag: `claude --plugin-dir plugins/fr-workflow`.
 - `fr.sh` must keep running on bash 3.2 (macOS) and Git Bash: no associative
-  arrays, no `mapfile`. Check with `/bin/bash -n plugins/fr-workflow/scripts/fr.sh`.
+  arrays, no `mapfile`, no `case` inside `$(…)`. Check with
+  `/bin/bash -n plugins/fr-workflow/scripts/fr.sh`.
+- `bash tests/fr-sh.sh` runs the regression suite for `fr.sh` against throwaway
+  repos with a stub `gh` — nothing reaches GitHub. On macOS run it with
+  `/bin/bash` (3.2). Every bug fixed in `fr.sh` gets a case there.
 - `claude plugin validate .` and `claude plugin validate plugins/fr-workflow`.
 - End-to-end in the private sandbox `bmoers/fr-workflow-sandbox`: raise its pinned
   `ref` only after a change works there.
 
 **Release**
 
-1. Add the version to [`CHANGELOG.md`](CHANGELOG.md).
-2. Raise `version` in `plugins/fr-workflow/.claude-plugin/plugin.json`.
-3. Update the example tag in `docs/installation.md`.
-4. Commit, tag `vX.Y.Z`, push the tag. Never move a pushed tag — release a new one.
+1. `/bin/bash tests/fr-sh.sh` reports `0 failed`, and both `claude plugin validate`
+   runs pass.
+2. Add the version to [`CHANGELOG.md`](CHANGELOG.md).
+3. Raise `version` in `plugins/fr-workflow/.claude-plugin/plugin.json`.
+4. Update the example tag in `docs/installation.md`.
+5. Commit, tag `vX.Y.Z`, push the tag. Never move a pushed tag — release a new one.
 
 **Access while private:** every developer of a project using the plugin needs read
 access to this repository. Background auto-update is off for this marketplace;

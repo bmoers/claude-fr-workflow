@@ -1,6 +1,6 @@
 {
   "name": "fr-workflow",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Feature-request workflow for GitHub projects: issues and FR docs linked m:n, one branch and worktree per FR, and a gated ship step — review, PR, CI, test deployment, acceptance check.",
   "author": { "name": "Boris Moers" },
   "repository": "https://github.com/bmoers/claude-fr-workflow",

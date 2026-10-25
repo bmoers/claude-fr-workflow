@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.3.1] — 2026-10-26
+
+Findings of the first full end-to-end run in the sandbox (new → start in
+parallel → status → ship → merge → done).
+
+### Fixed
+
+- `ship`: a review's report could end the run — seen after `/security-review` in
+  a headless run, which then stopped before the push. The skill now states that
+  both reviews are inputs and the run continues up to step 7.
+- `done`: `claude rm` removes a finished background session together with its
+  worktree and lock; the local branch is deleted before the remote one, so
+  `git branch -d` works after a squash merge.
+
+### Added
+
+- `tests/fr-sh.sh`: the regression suite for `fr.sh` (33 cases, throwaway repos,
+  stub `gh`), now part of the release checklist.
+
+### Docs
+
+- Raising the pinned `ref` takes effect with a **new session**;
+  `/plugin marketplace update` alone keeps following the old `ref`.
+- Headless runs (`claude -p`, CI) do not load the plugin from project settings —
+  use `--plugin-dir` with the marketplace copy.
+- `claude logs` is the raw terminal capture; `claude attach` is easier to read.
+
 ## [0.3.0] — 2026-10-25
 
 ### Added

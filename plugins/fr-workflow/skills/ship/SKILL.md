@@ -53,7 +53,10 @@ step 6 — and **before stopping at any gate**, so other FRs are not blocked.
      default branch it may compare against the default branch: check that its
      findings concern this FR's files.
 
-   Take both results before applying the gates.
+   Take both results before applying the gates. **Neither review ends this
+   skill:** when one returns its report, do not end your turn — wait for the
+   other (the background `/code-review` reports back by itself) and continue
+   with 3. in the same run, up to step 7.
 3. **Secrets always stop** — hard-coded credentials, tokens, private keys —
    whatever the gates say, and they cannot be accepted. The unpushed commits that
    contain one are rewritten so it never reaches the remote. `<target>` is

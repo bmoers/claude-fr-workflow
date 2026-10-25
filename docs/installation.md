@@ -38,7 +38,7 @@ whatever other plugins and skills they use.
    {
      "extraKnownMarketplaces": {
        "claude-fr-workflow": {
-         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.3.0" }
+         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.3.1" }
        }
      },
      "enabledPlugins": { "fr-workflow@claude-fr-workflow": true }
@@ -89,9 +89,24 @@ Repositories pin a version, so nobody gets changes by surprise.
 
 1. Read the [changelog](../CHANGELOG.md) for the new tag.
 2. Raise `ref` in `.claude/settings.json`, commit, merge.
-3. Every developer, after pulling:
-   `/plugin marketplace update claude-fr-workflow`, then `/reload-plugins` (or
-   start a new session).
+3. Every developer, after pulling: **start a new Claude Code session** in the
+   repository. At session start Claude Code reads the pinned `ref` from the
+   project settings and fetches that version. `/plugin marketplace update` on its
+   own is not enough — it refreshes the marketplace at the `ref` it was
+   registered with, i.e. the old version.
+
+## Headless runs (`claude -p`, scripts, CI)
+
+Non-interactive runs do not load the plugin from the project settings. Point them
+at the marketplace copy that interactive sessions keep up to date:
+
+```bash
+claude -p "/fr-workflow:status" --plugin-dir ~/.claude/plugins/marketplaces/claude-fr-workflow/plugins/fr-workflow
+```
+
+Background sessions started by `/fr-workflow:start` are regular interactive
+sessions. If `/fr-workflow:ship` is unknown after `claude attach`, start it from a
+new session in the FR's worktree (`claude -w <worktree name>`).
 
 ## Opting out — one developer
 
@@ -119,3 +134,5 @@ the FR documents — they are plain Markdown and stay readable without the plugi
 | `npx: command not found` when Playwright starts | Node.js missing, or not on the `PATH` of the terminal that started Claude Code | install Node.js; start `claude` from a terminal where `npx` works |
 | Playwright tools appear twice | your own server and the plugin's | disable one in `/mcp` |
 | `Workspace not trusted` when `start` launches background sessions | background sessions only run in a trusted folder | run `claude` once in the repository root and accept the trust prompt |
+| `/plugin` still shows the old version after the `ref` was raised | the session started before the pull, or only `/plugin marketplace update` ran | start a new session in the repository |
+| `/fr-workflow:…` unknown in `claude -p` | headless runs do not load project plugins | add `--plugin-dir` — see [headless runs](#headless-runs-claude--p-scripts-ci) |

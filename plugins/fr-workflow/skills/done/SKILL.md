@@ -63,15 +63,18 @@ Arguments: $ARGUMENTS — an FR id, or a PR number (→ the FR whose `pr:` match
    - A Claude session still running in the FR's worktree? Check
      `claude agents --json` (match `cwd` to the worktree path, or `name` starting
      with `<ID> `). Running → stop here and name it; the user ends it
-     (`claude stop <id>`) or lets it finish. A finished background session: offer
-     `claude rm <id>`.
+     (`claude stop <id>`) or lets it finish. A finished background session:
+     `claude rm <id>` — it also removes the session's worktree and its lock when
+     that is safe (it refuses on unpushed work), so the next two points may have
+     nothing left to do.
    - `git worktree list --porcelain` shows the worktree `locked claude session …
      (pid N …)`: pid N still running (`ps -p N`) → a session is alive, stop as
      above. Not running → stale lock: `git worktree unlock <path>`.
    - `git worktree remove .claude/worktrees/<…>` — refuses on uncommitted changes:
      report them, never `--force`.
-   - `git branch -d <branch>` — refuses after a squash merge or a drop, which git
-     cannot see as merged: ask before `-D`. After a drop, first show
+   - `git branch -d <branch>` **before** deleting the remote branch — while
+     `origin/<branch>` still exists, git accepts `-d` after a squash merge. It
+     refuses after a drop, or once the remote branch is gone: ask before `-D`. After a drop, first show
      `git log origin/<branch>..<branch> --oneline`: those local commits are lost
      with `-D`.
    - Remote branch after a merge: nothing if GitHub deleted it; otherwise offer

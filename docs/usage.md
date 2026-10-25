@@ -177,7 +177,7 @@ and effort. FRs of later waves are not started; it says why.
 | To | Run |
 |---|---|
 | see all sessions and their state live | `claude agents` |
-| read what one is doing | `claude logs "FR-012"` |
+| read what one is doing | `claude logs "FR-012"` (the raw terminal capture — `claude attach` is easier to read) |
 | answer its questions, or take over | `claude attach "FR-012"` |
 | see FRs and sessions side by side | `/fr-workflow:status` |
 
