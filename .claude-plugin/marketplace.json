@@ -1,0 +1,12 @@
+{
+  "name": "claude-fr-workflow",
+  "owner": { "name": "Boris Moers" },
+  "description": "Feature-request workflow for Claude Code: issues and FRs linked m:n, gated ship step.",
+  "plugins": [
+    {
+      "name": "fr-workflow",
+      "source": "./plugins/fr-workflow",
+      "description": "Issues → FR docs (m:n) → one worktree per FR → gated ship: review, PR, CI, test deployment, acceptance check."
+    }
+  ]
+}
