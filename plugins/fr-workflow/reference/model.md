@@ -120,11 +120,13 @@ does not give — ask.
 | `sync <ref>... [--dry-run]` | create or update the backlink comment of these issues |
 | `sync-fr <ID>...\|--all [--dry-run]` | the same for every issue of these FRs, past links included — what the skills use |
 | `overlap [<ID>...]` | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now |
-| `lock acquire\|release\|status <ID>` | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it |
+| `lock acquire\|release\|break\|status <ID>` | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs |
 
 `location` is `base`, `branch` (then `ref` is the branch) or `local` (uncommitted
-in this checkout). All but `check` fetch origin first; pass `--no-fetch` after
-the first call within one skill run.
+in this checkout). `list`, `next-id`, `issue-frs`, `sync`, `sync-fr` and `overlap`
+fetch origin first; pass `--no-fetch` after the first call within one skill run.
+Issue refs are compared case-insensitively. Two FR branches with the same id make
+`fr.sh` print a warning — renumber one of them.
 
 ## Hard rules — every skill, every project
 
@@ -135,6 +137,11 @@ The profile and the project's `CLAUDE.md` may add rules; they never relax these.
   deploy jobs). If a deployment does not come, report it.
 - **Never touch production** — no reads, no writes — unless the user explicitly
   asks, for that one action.
+- **No code leaves the machine unreviewed.** Implementation sessions commit but
+  never push; the first push of code is `:ship`, after its code and security
+  review. `:new` and `:start` push only FR docs.
+- **Secrets never get pushed.** A credential found in a change always stops,
+  cannot be accepted, and is removed from the unpushed commits before any push.
 - **Never write a CI skip marker** — `[skip ci]`, `[ci skip]`, `[no ci]`,
   `[skip actions]`, `[actions skip]`, a `skip-checks:` trailer — into a commit
   message, PR title or PR body. A squash merge copies the branch's commit

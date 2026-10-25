@@ -14,7 +14,8 @@ Read `${CLAUDE_PLUGIN_ROOT}/reference/model.md` and `.claude/workflow.md`.
 FRs: $ARGUMENTS — none given → `fr.sh list`, offer the `open` FRs, ask.
 
 Work from the **main worktree** — `claude -w` resolves worktree names there:
-`cd "$(git worktree list --porcelain | awk 'NR==1 { print $2 }')"`.
+`cd "$(git worktree list --porcelain | sed -n '1s/^worktree //p')"` (keeps paths
+with spaces intact).
 
 ## 1. Check each FR
 
@@ -39,9 +40,22 @@ once the conflicting FR is merged — or now, if the user accepts the overlap.
 
 1. `git worktree add .claude/worktrees/<id-lower>-<slug> <branch>` — git creates the
    local tracking branch from origin.
-2. In the worktree: `status: in-progress`, commit (`docs(fr): start <ID>` or the
-   project's convention), push. Then `fr.sh sync-fr <ID> --no-fetch`.
-3. Model and effort: the FR's `model` and `effort` from the frontmatter, else the
+2. A local branch that existed already may be behind origin (someone pushed to
+   it): when `origin/<branch>` exists, `git merge --ff-only origin/<branch>` in
+   the worktree — name it explicitly, the upstream may be the base branch. Not a
+   fast-forward (both sides moved) → leave this FR out and say so; never rebase or
+   force.
+3. **`open` FR:** in the worktree set `status: in-progress`, commit
+   (`docs(fr): start <ID>` or the project's convention). Push only if the branch
+   has no unpushed code: `git log <since>..HEAD -- . ':(exclude)<fr_dir>'` must
+   **succeed** and print nothing — `<since>` is `origin/<branch>`, or
+   `$(git merge-base origin/<base_branch> HEAD)` when the branch was never pushed.
+   A failing command means: do not push. Code leaves the machine only through
+   `:ship`. Then `fr.sh sync-fr <ID> --no-fetch`.
+   **`in-progress` or `in-review` FR being resumed:** change nothing, push nothing
+   — its worktree may hold unreviewed local commits, and a push to a branch with an
+   open PR can deploy.
+4. Model and effort: the FR's `model` and `effort` from the frontmatter, else the
    profile's `impl_model` and `impl_effort`, else `opus` and `high`.
 
 ## 4. Start the sessions
@@ -49,18 +63,20 @@ once the conflicting FR is merged — or now, if the user accepts the overlap.
 The command for an FR:
 
 ```bash
-claude -w <id-lower>-<slug> --model <model> --effort <effort> -n "<ID> <title>" '<prompt>'
+claude -w <id-lower>-<slug> --model <model> --effort <effort> -n '<ID> <clean title>' '<prompt>'
 ```
 
 `-w` with an existing name opens that worktree on its FR branch; it does not
-create a new one. The prompt, in single quotes, without backticks or single
-quotes inside:
+create a new one. Both quoted values go in **single quotes**, and contain no
+single quotes, double quotes, backticks, `$` or backslashes — remove them from
+the title (it often comes from customer-written issues). The prompt:
 
 > Implement <ID>. First run git branch --show-current: it must print <branch>, else
-> stop and say so. Read <fr_dir>/<file> — it is your whole brief — and
+> stop and say so. Read <fr_dir>/<file> - it is your whole brief - and
 > .claude/workflow.md. Keep the FR document current: decisions and deviations go
-> into it, in the same commits as the code. Run the profile's local checks, commit
-> and push. Never merge. When done, stop with a short summary of what you did and
+> into it, in the same commits as the code. Run the profile's local checks and
+> commit. Do not push: /fr-workflow:ship pushes after its code and security
+> review. Never merge. When done, stop with a short summary of what you did and
 > what is open; the user then runs /fr-workflow:ship here.
 
 - **One FR** → give the user the command for a fresh terminal. If they prefer to go

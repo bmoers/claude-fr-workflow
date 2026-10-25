@@ -18,7 +18,7 @@ flowchart LR
 | `/fr-workflow:init` | once per repository: project profile, FR folder, team settings |
 | `/fr-workflow:new` | plan: issues and/or a discussion → one or more FR documents, each on a pushed branch |
 | `/fr-workflow:start` | build: a worktree per FR and a fresh session with the FR's model and effort — several non-overlapping FRs in parallel, as background sessions |
-| `/fr-workflow:ship` | finish: review gate → PR → CI → test deployment → acceptance check → result into the FR document |
+| `/fr-workflow:ship` | finish: code and security review → PR → CI → test deployment → acceptance check → result into the FR document |
 | `/fr-workflow:done` | after the merge — or to drop an FR: close fully served issues (asks first), clean up |
 | `/fr-workflow:status` | overview of all FRs with their sessions, and which can run in parallel |
 | `/fr-workflow:sync` | refresh the generated issue comments, e.g. after editing an FR by hand |
@@ -46,6 +46,12 @@ flowchart LR
   protected base branch after a merge.
 - **Project facts live in the project** (`.claude/workflow.md`), the process lives
   here. The plugin contains nothing customer-specific.
+- **No code leaves the machine unreviewed.** Implementation sessions commit
+  without pushing; `ship` pushes after the code and security review. A secret
+  found there always stops and is removed from the unpushed commits.
+- **Playwright MCP stays on `@latest`** — deliberately: it is maintained by
+  Microsoft, and an outdated pin would be one more thing to keep up. The trade-off
+  is that a new Playwright release reaches every project at once.
 - **No CI skip markers, anywhere.** A squash merge would carry them onto the base
   branch and skip its release. Builds from planning pushes are avoided with
   `paths-ignore` on push triggers, which `init` proposes.

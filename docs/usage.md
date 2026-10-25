@@ -82,8 +82,9 @@ End the session here.
   safety net the session first checks that it is on that branch and stops if not.
 
 While implementing, decisions and deviations go into the FR document, in the same
-commits as the code. The session ends with a summary; you then run
-`/fr-workflow:ship` in it.
+commits as the code. The session **commits but does not push** — code leaves your
+machine only through `/fr-workflow:ship`, after its review. The session ends with
+a summary; you then run `/fr-workflow:ship` in it.
 
 **Several FRs:** `/fr-workflow:start FR-012 FR-014 FR-015` — see
 [working in parallel](#working-in-parallel).
@@ -94,8 +95,8 @@ Run it in the FR's worktree. It works through seven steps; each one can stop.
 
 | # | Step | Stops when |
 |---|---|---|
-| 1 | Code review of everything the branch changes (Claude Code's built-in `/code-review`), then the project's fast local checks | review findings, failing checks |
-| 2 | Commit, push, open the PR — linking the issues with `Refs #12`, never `Closes`. If another FR was merged meanwhile and the PR conflicts, it merges `main` into the branch (no rebase, no force push) | conflicts that need a decision |
+| 1 | Commits locally, then reviews everything the branch changes against `main` — Claude Code's built-in `/code-review` and `/security-review`, side by side — then the project's fast local checks. **A secret always stops**, cannot be accepted, and is removed before anything is pushed | review or security findings, failing checks |
+| 2 | The first push of the code, then the PR — linking the issues with `Refs #12`, never `Closes`. If another FR was merged meanwhile and the PR conflicts, it merges `main` into the branch (no rebase, no force push) and reviews again | conflicts that need a decision |
 | 3 | Wait for CI | a check fails |
 | 4 | Wait for the test deployment, the way the profile describes | the deployment fails or does not come in time — it never starts one itself |
 | 5 | Acceptance check: every criterion becomes a concrete check, run in a browser against the test environment | a criterion fails; a login page appears (you log in yourself, in the browser window); criteria it could not verify (you decide) |
@@ -104,7 +105,8 @@ Run it in the FR's worktree. It works through seven steps; each one can stop.
 
 **When it stops,** Claude shows what it found — findings, a failing log, a
 screenshot. You decide: fix it and run `/fr-workflow:ship` again (it reuses the
-PR), accept it, or stop.
+PR), accept it, or stop. A security finding you accept is listed with your reason
+in the PR under *Review notes*, so whoever reviews the PR sees it.
 
 **No test environment?** Then step 5 checks what it can locally — tests, a local
 run, the code — and lists the criteria it could not verify. They count only if
@@ -227,7 +229,8 @@ edits are lost.
 ## Which pushes trigger builds
 
 `/fr-workflow:new` and `/fr-workflow:start` push commits that change only the FR
-document. Whether that starts a build depends on the project's workflows:
+document; implementation sessions push nothing. Whether a planning push starts a
+build depends on the project's workflows:
 
 | Workflows trigger on | Planning pushes build? |
 |---|---|
@@ -250,6 +253,7 @@ That is intended — the commit that gets merged must have green checks.
 - merge a PR;
 - start or re-run a deployment;
 - touch production — unless you ask for one specific action;
+- push code that has not been through the code and security review;
 - force-push, or discard your uncommitted changes;
 - write CI skip markers such as `[skip ci]` anywhere;
 - ask for, store or type passwords — at a login page you log in yourself;
@@ -285,7 +289,7 @@ at the top as it is: one `key: value` per line, the issue list on one line.
 the project turned it on, the "ready for acceptance" note. The FR documents are in
 the repository.
 
-## Known limitations (v0.1)
+## Known limitations
 
 - GitHub and GitHub Actions only. Jira links are reserved in the format
   (`jira:KEY-123`) but not processed yet.

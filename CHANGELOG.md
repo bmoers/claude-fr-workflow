@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.3.0] — 2026-10-25
+
+### Added
+
+- `ship` runs the built-in `/security-review` alongside `/code-review`. Security
+  findings follow the new profile key `security_gate` (default `stop`),
+  independent of `review_gate`. Accepted security findings go into the PR body
+  under *Review notes* with the user's reason.
+- `init` picks up security tooling the repository already uses (dependency audit,
+  secret scanning) into *Local checks before commit*, scoped to the FR's changes.
+- `fr.sh lock break` for a lock left without owner.
+
+### Changed
+
+- **Implementation sessions commit but no longer push.** `ship` commits locally,
+  runs both reviews on `origin/<base>...HEAD` — side by side, again after every
+  fix — and only then pushes. Before, `/code-review` without a target saw only
+  what was ahead of the upstream, which could be nothing.
+- **Secrets always stop** in `ship`, cannot be accepted, and are removed from the
+  unpushed commits; a credential pushed earlier must be rotated.
+- `security_gate: report` puts every security finding into *Review notes*; a
+  reused PR gets its body updated; public repositories get no finding details.
+- `ship` takes the shared-environment lock before the first push *or* PR creation,
+  reuses only an **open** PR, accepts the test merge commit as "this PR's commit"
+  for `url` and `pr-comment`, paginates and matches SHAs in deploy comments, and no
+  longer waits forever after step 6 when `paths-ignore` skips the deployment.
+- `start` keeps main-worktree paths with spaces, strips quotes from the session
+  name, and fast-forwards a stale local branch.
+- `new` uses `--limit 200`, ASCII slugs, and re-checks the id right before pushing.
+- `done … drop` also covers FRs that exist only on the base branch.
+
+### Fixed
+
+- `fr.sh`: FR docs with non-ASCII file names were invisible (git path quoting) and
+  their id was handed out again; issue refs were compared case-sensitively;
+  `check` passed without `origin`; owners starting with a digit were mangled;
+  docs renamed on their branch were dropped; branch names like `i18n/fr-2024`
+  moved `next-id`; two branches with the same id went unnoticed; parallel syncs
+  could leave a second, stale backlink comment; globs in `areas` and unpushed
+  local commits were ignored by `overlap`.
+- `fr.sh`: one rule decides what an FR branch is (from `branch_pattern`), so
+  `i18n/fr-2024-cleanup` neither moves `next-id` nor counts as an FR branch; a
+  local branch ahead of origin is read instead of origin's; an FR doc edited on
+  another branch (e.g. main) no longer masks its FR branch; a rename on the base
+  branch is not reported as a duplicate id; `areas: [.]` and `{…}` globs count
+  as overlap; a branch without merge base no longer aborts `overlap`; a failed
+  duplicate-comment delete no longer aborts `sync`; the lock is only called stale
+  after a failed `mkdir` and a short wait, and `lock break` reports failure.
+- `ship`: secret removal runs in a safe order — check for unpushed merges and
+  foreign pushes first, commit the removal, then squash onto `origin/<branch>` or
+  the merge base, then verify; a merge commit only counts as "this PR's" when
+  its other parent is on the base branch.
+
+### Upgrade notes
+
+- Profiles written before 0.3.0 have no `security_gate`; the default `stop`
+  applies. Add `security_gate: stop` (or `report`) to make it explicit.
+- Implementation sessions no longer push. Teammates see an FR's code on GitHub
+  only after `ship`.
+
 ## [0.2.0] — 2026-10-25
 
 ### Added

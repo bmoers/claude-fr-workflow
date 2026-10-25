@@ -21,10 +21,12 @@ Any mix of:
 - Issue refs `#12`, `owner/repo#12`, issue URLs →
   `gh issue view <n> -R <repo> --json number,title,body,labels,comments,url`.
   Default repo: `issue_repo` from the profile, else this repository.
-- `label:<name>` / `milestone:<name>` → `gh issue list -R <repo> --state open --label … / --milestone …`.
-- `project:<owner>/<number>` → `gh project item-list <number> --owner <owner> --format json`,
+- `label:<name>` / `milestone:<name>` → `gh issue list -R <repo> --state open --limit 200 --label … / --milestone …`.
+- `project:<owner>/<number>` → `gh project item-list <number> --owner <owner> --limit 200 --format json`,
   issues only; apply a status or view filter if the user names one.
-- `search:<query>` → `gh issue list -R <repo> --search "<query>"`.
+- `search:<query>` → `gh issue list -R <repo> --limit 200 --search "<query>"`.
+- A list that reaches the limit is incomplete: say so and ask to narrow the
+  selection — never plan from a silently cut list.
 - A local file — notes, a requirements document, an FR draft, a legacy FR without
   frontmatter → read it as the source. The new FR gets a new id; name the source
   file in its *Technical notes*. Do not modify or move the source file.
@@ -62,16 +64,24 @@ For every issue also run `fr.sh issue-frs <ref>` — it may be served by FRs alr
 One after another, so ids cannot collide:
 
 1. `fr.sh next-id` (`--no-fetch` from the second call on).
-2. Branch name from `branch_pattern`; slug = 3–5 words of the title, lowercase,
-   joined with `-`.
+2. Branch name from `branch_pattern`; slug = 3–5 words of the title, lowercase
+   ASCII joined with `-` (ä→ae, ö→oe, ü→ue, ß→ss, accents dropped). The file name
+   uses the same slug.
 3. Create it without touching the user's checkout:
    `git worktree add -b <branch> .claude/worktrees/_new-<id-lower> origin/<base_branch>`
 4. There, write `<fr_dir>/<ID>-<slug>.md` from `${CLAUDE_PLUGIN_ROOT}/templates/fr.md`:
    frontmatter with `status: open`, canonical `issues`, `areas`, `model`,
-   `effort`, `created` = today; the sections from the discussion. Acceptance criteria must be checkable on the test
-   environment by someone who did not write the code.
-5. Commit with the project's convention (default `docs(fr): add <ID> <title>`),
-   then `git push -u origin <branch>`.
+   `effort`, `created` = today; the sections from the discussion. Acceptance
+   criteria must be checkable on the test environment by someone who did not
+   write the code. Never copy credentials, tokens or personal data from issues
+   into the FR doc — issue bodies often hold pasted logs; describe instead.
+5. Commit with the project's convention (default `docs(fr): add <ID> <title>`).
+   After the commit, before pushing: check the doc for credentials or personal
+   data, and run the profile's secret scan on the commit if there is one — the
+   documented scans work on a commit range, so they see nothing before the commit.
+   Right before pushing, `fr.sh list` (with fetch): if a teammate pushed the same
+   id meanwhile, renumber this FR (`fr.sh next-id`; rename file, branch, id) first.
+   Then `git push -u origin <branch>`.
 6. `git worktree remove .claude/worktrees/_new-<id-lower>` — it is clean after the
    commit; never `--force`.
 

@@ -7,7 +7,8 @@ branch_pattern: "{type}/{id-lower}-{slug}"
 issue_repo:                       # owner/repo of the issues; empty = this repository
 backlinks: on                     # on | off — backlink comment on linked issues
 notify_issues: ask                # never | ask | always — "ready for acceptance" comment
-review_gate: stop                 # stop | report — what :ship does on review findings
+review_gate: stop                 # stop | report — what :ship does on code review findings
+security_gate: stop               # stop | report — what :ship does on security review findings
 deploy_signal: none               # none | pr-checks | pr-comment | url
 deploy_comment_marker:            # pr-comment: text identifying the deploy comment
 deploy_success_marker:            # pr-comment: text that means success
@@ -33,7 +34,14 @@ squash-merge title and is linted; FR id goes into the subject, not the type. -->
 
 ## Local checks before commit
 
-<!-- commands for typecheck, lint, unit tests — the fast ones -->
+<!-- commands for typecheck, lint, unit tests — the fast ones. Security tools the
+project already uses, scoped to the FR's own changes (they run after its local
+commit, before the first push), e.g.
+  gitleaks detect --log-opts="origin/main..HEAD"
+  git diff --quiet origin/main...HEAD -- package-lock.json || npm audit --audit-level=high
+A full dependency audit belongs in CI: run unscoped it blocks every FR whenever a
+new advisory appears anywhere in the tree. -->
+
 
 ## CI
 

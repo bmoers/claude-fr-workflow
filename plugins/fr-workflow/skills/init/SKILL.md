@@ -35,6 +35,14 @@ Derive what you can from the repository; ask only for what you cannot.
   the profile's *CI* section.
 - Conventions: `commitlint.config.*`, husky hooks, PR-title lint, `CONTRIBUTING.md`.
 - Fast local checks: `package.json` scripts, `Makefile`, `pyproject.toml`.
+- Security tooling the repository already uses: dependency audit (`npm audit`,
+  `pip-audit`, …), secret scanning (gitleaks config, pre-commit hooks), CodeQL or
+  other scanning workflows. Fast ones go into *Local checks before commit*,
+  **scoped to the FR's own changes** — they run after its local commit:
+  `gitleaks detect --log-opts="origin/<base>..HEAD"`; a dependency audit only when
+  the lockfile changed (`git diff --quiet origin/<base>...HEAD -- <lockfile> || <audit>`).
+  Full scans go into *CI*. Do not add new tools; `:ship` runs the built-in
+  `/security-review` anyway.
 - `CLAUDE.md` rules on production, deployments, git.
 
 ## 2. Propose the profile

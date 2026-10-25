@@ -26,7 +26,8 @@ tokens.
 | `issue_repo` | this repository | `owner/repo` where the issues live, if not here |
 | `backlinks` | `on` | `off` = no generated comment on issues |
 | `notify_issues` | `ask` | "ready for acceptance" comment after a successful ship: `never`, `ask`, `always` |
-| `review_gate` | `stop` | review findings `stop` the ship, or are only collected for the `report` |
+| `review_gate` | `stop` | code review findings `stop` the ship, or are only collected for the `report` |
+| `security_gate` | `stop` | the same for security review findings — set separately, so style findings can be `report` while security findings still stop. **Secrets always stop**, whatever this says. Missing in an older profile → `stop` |
 | `deploy_signal` | `none` | how ship knows the PR is on the test environment — see below |
 | `deploy_comment_marker` | — | for `pr-comment`: text that identifies the deploy comment |
 | `deploy_success_marker` | — | for `pr-comment`: text in that comment that means success |
@@ -64,7 +65,7 @@ it — Claude reads it there.
 | Section | What to write |
 |---|---|
 | **Commit and PR conventions** | e.g. "Conventional Commits, enforced by commitlint. The PR title becomes the squash-merge title and is linted. The FR id goes into the subject: `feat(checkout): coupon field (FR-012)`." |
-| **Local checks before commit** | the fast commands: `npm run typecheck`, `npm run lint`, `npm test` |
+| **Local checks before commit** | the fast commands: `npm run typecheck`, `npm run lint`, `npm test` — and security tools the project already uses, **scoped to the FR's changes**: `gitleaks detect --log-opts="origin/main..HEAD"`, or `git diff --quiet origin/main...HEAD -- package-lock.json \|\| npm audit --audit-level=high` (audit only when the lockfile changed). A full audit belongs in CI — unscoped, a new advisory anywhere in the tree would block every FR |
 | **CI** | which PR checks matter, how long they usually take; whether pushes that change only FR documents start builds, and how that is handled (e.g. `paths-ignore` on the push trigger) |
 | **Test environment** | how a PR gets there, the URL, how to get in (SSO, Cloudflare Access, basic auth), test accounts by name or role, which data may be used |
 | **Deploy verification** | optional read-only commands that prove what runs, e.g. `kubectl -n staging get deploy -o wide` |
@@ -82,7 +83,8 @@ branch_pattern: "{type}/{id-lower}-{slug}"
 issue_repo: acme/shop-requests
 backlinks: on
 notify_issues: always
-review_gate: stop
+review_gate: report
+security_gate: stop
 deploy_signal: url
 deploy_version_url: https://staging.shop.example/version
 deploy_timeout_min: 20
