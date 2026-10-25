@@ -54,7 +54,7 @@ gets the plugin:
 {
   "extraKnownMarketplaces": {
     "claude-fr-workflow": {
-      "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.1.0" }
+      "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.1.1" }
     }
   },
   "enabledPlugins": { "fr-workflow@claude-fr-workflow": true }

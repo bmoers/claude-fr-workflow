@@ -52,7 +52,7 @@ show the evidence, the user decides. No improvised fixes.
 
 ## 4. Test deployment gate — by `deploy_signal`
 
-- `none` → no test environment: skip steps 4 and 5 and say so in the report.
+- `none` → no test environment: skip this step; step 5 checks locally.
 - `pr-checks` → covered by step 3. Confirm `test_env_url` (`{pr}` replaced)
   responds.
 - `pr-comment` → the PR comment containing `deploy_comment_marker` counts only if
@@ -82,17 +82,23 @@ profile's *Deploy verification* commands, if any — read-only.
   auth) → stop and ask the user to log in in the open browser window. Its profile
   is persistent; the login lasts as long as that provider's session.
 - Screenshots to `.playwright-mcp/<id-lower>/` (gitignored), without personal data.
+- No test environment (`deploy_signal: none`) or no browser
+  (`acceptance_browser: none`) → check what you can locally: tests, a local run,
+  reading the code. Mark every criterion that could not be verified this way as
+  **unverified** — never as passed.
 - A criterion fails → stop with evidence: screenshot, log, request and response.
   No fix loop without the user.
+- Criteria left unverified → list them and ask: the user either accepts them as
+  unverified or stops here.
 
 ## 6. Record the result
 
-Only when every criterion passed:
+Only when no criterion failed, and the user accepted any unverified ones:
 
-- Fill `## Acceptance check` in the FR doc: date, environment URL, PR #N at
-  `<short SHA>`; per criterion what was checked, how, and the result; the limits
-  of the check.
-- Tick only the criteria actually verified (`- [x]`).
+- Fill `## Acceptance check` in the FR doc: date, environment (URL, or "local"),
+  PR #N at `<short SHA>`; per criterion what was checked, how, and the result —
+  `passed` or `unverified, accepted by <user>`; the limits of the check.
+- Tick only the criteria actually verified (`- [x]`); unverified ones stay open.
 - `status: in-review`.
 - Commit (`docs(fr): acceptance check <ID>` or the project's convention) and push.
   This may run CI and the deployment again — do not wait for it.
