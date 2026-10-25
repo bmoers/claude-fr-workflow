@@ -4,32 +4,43 @@ A Claude Code plugin for a feature-request workflow in GitHub projects. It
 carries one way of working from project to project, independent of what else a
 developer has installed.
 
-```
-issues ──m:n── FR docs ──► one branch + worktree per FR ──► ship ──► merge (human) ──► done
-                                                            │
-                     review gate · PR · CI · test deployment · acceptance check
+```mermaid
+flowchart LR
+  I["GitHub issues"] -->|"new"| O["FR docs<br/>m:n to issues"]
+  O -->|"start"| P["one worktree<br/>per FR"]
+  P -->|"ship"| R["review · PR · CI ·<br/>test deploy · acceptance"]
+  R -->|"you merge"| M["merged"]
+  M -->|"done"| C["served issues closed"]
 ```
 
-| Command | Session | Does |
-|---|---|---|
-| `/fr-workflow:init` | once per repo | project profile, FR folder, team settings |
-| `/fr-workflow:new` | 1 — plan | issues and/or discussion → one or more FR docs, each on a pushed branch, issues get a backlink |
-| `/fr-workflow:start` | 2 — build | worktree for the FR, status `in-progress` |
-| `/fr-workflow:ship` | 2 — finish | review gate → PR → CI → test deployment → acceptance check → results into the FR doc |
-| `/fr-workflow:done` | after merge | backlinks, close fully served issues (asks first), clean up |
-| `/fr-workflow:status` | any | overview of all FRs, including unmerged ones |
+| Command | Does |
+|---|---|
+| `/fr-workflow:init` | once per repository: project profile, FR folder, team settings |
+| `/fr-workflow:new` | plan: issues and/or a discussion → one or more FR documents, each on a pushed branch |
+| `/fr-workflow:start` | build: a worktree for the FR, status `in-progress` |
+| `/fr-workflow:ship` | finish: review gate → PR → CI → test deployment → acceptance check → result into the FR document |
+| `/fr-workflow:done` | after the merge: close fully served issues (asks first), clean up |
+| `/fr-workflow:status` | overview of all FRs, including unmerged ones |
 
-The model and the rules every command follows: [`reference/model.md`](plugins/fr-workflow/reference/model.md).
+## Documentation
+
+| Page | For |
+|---|---|
+| [Installation](docs/installation.md) | setting up a repository, prerequisites for developers, updates, troubleshooting |
+| [Usage](docs/usage.md) | the workflow step by step, with an example |
+| [Profile reference](docs/profile.md) | every setting in `.claude/workflow.md`, choosing the deploy signal |
+| [For issue authors](docs/for-issue-authors.md) | customers and others who write issues — no technical knowledge needed |
+| [Model and rules](plugins/fr-workflow/reference/model.md) | the data model and the hard rules every command follows |
 
 ## Design decisions
 
 - **The FR frontmatter is the single source of truth** for the m:n link. The
-  backlink comment on each issue is derived by `scripts/fr.sh` and can be
-  regenerated at any time.
+  comment on each issue is derived by `scripts/fr.sh` and can be regenerated at
+  any time.
 - **`Refs`, never `Closes`.** With m:n the first merge would close an issue other
-  FRs still serve. `:done` closes issues when all their FRs are merged.
+  FRs still serve. `done` closes an issue when all its FRs are merged.
 - **No shared index file.** A table edited in every PR conflicts and drifts;
-  `:status` derives the overview.
+  `status` derives the overview.
 - **`merged` is derived, not written** — nothing needs to be committed to a
   protected base branch after a merge.
 - **Project facts live in the project** (`.claude/workflow.md`), the process lives
@@ -37,39 +48,38 @@ The model and the rules every command follows: [`reference/model.md`](plugins/fr
 - **Hard limits:** never merges, never triggers deployments, never touches
   production, never handles credentials.
 
-## Requirements
+## Maintaining the plugin
 
-Claude Code, `git`, an authenticated [`gh`](https://cli.github.com), `bash`
-(Git Bash on Windows) and Node/`npx` for the bundled Playwright MCP server. If a
-developer already runs their own Playwright server, they can disable the plugin's
-one in `/mcp`.
+**Layout**
 
-## Use it in a repository
-
-Run `/fr-workflow:init` in the repository. It writes the profile and adds this to
-the repository's `.claude/settings.json`, so every teammate who trusts the folder
-gets the plugin:
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "claude-fr-workflow": {
-      "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.1.1" }
-    }
-  },
-  "enabledPlugins": { "fr-workflow@claude-fr-workflow": true }
-}
+```
+.claude-plugin/marketplace.json     the marketplace (lists the plugin by relative path)
+plugins/fr-workflow/
+  .claude-plugin/plugin.json        name, version
+  .mcp.json                         bundled Playwright MCP server
+  skills/<command>/SKILL.md         one folder per command
+  reference/model.md                model and rules, read by every command
+  scripts/fr.sh                     deterministic part: FR list, ids, issue comments
+  templates/                        FR document, profile, FR folder README
+docs/                               user documentation
 ```
 
-To try it before that: `/plugin marketplace add bmoers/claude-fr-workflow`, then
-`/plugin install fr-workflow@claude-fr-workflow`.
+**Develop and test**
 
-**Private repository:** every developer needs read access. Background
-auto-updates of a private marketplace need `GITHUB_TOKEN` in the environment;
-with a pinned `ref` updates are deliberate anyway — raise the tag in the project's
-settings.
+- Load the working copy instead of a tag: `claude --plugin-dir plugins/fr-workflow`.
+- `fr.sh` must keep running on bash 3.2 (macOS) and Git Bash: no associative
+  arrays, no `mapfile`. Check with `/bin/bash -n plugins/fr-workflow/scripts/fr.sh`.
+- `claude plugin validate .` and `claude plugin validate plugins/fr-workflow`.
+- End-to-end in the private sandbox `bmoers/fr-workflow-sandbox`: raise its pinned
+  `ref` only after a change works there.
 
-## Versioning
+**Release**
 
-Tags `vX.Y.Z`; projects pin a tag. Changes go into [`CHANGELOG.md`](CHANGELOG.md).
-Raise `version` in `plugins/fr-workflow/.claude-plugin/plugin.json` with every tag.
+1. Add the version to [`CHANGELOG.md`](CHANGELOG.md).
+2. Raise `version` in `plugins/fr-workflow/.claude-plugin/plugin.json`.
+3. Update the example tag in `docs/installation.md`.
+4. Commit, tag `vX.Y.Z`, push the tag. Never move a pushed tag — release a new one.
+
+**Access while private:** every developer of a project using the plugin needs read
+access to this repository. Background auto-update is off for this marketplace;
+projects update by raising their pinned `ref`.
