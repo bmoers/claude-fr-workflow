@@ -33,7 +33,11 @@ tokens.
 | `deploy_version_url` | — | for `url`: address that returns the deployed commit |
 | `deploy_timeout_min` | `30` | how long ship waits for the deployment |
 | `test_env_url` | — | base URL of the test environment; `{pr}` becomes the PR number |
+| `test_env` | `shared` | `per-pr` = every PR has its own preview, acceptance checks run in parallel; `shared` = one deployment at a time, acceptance checks run one after the other |
 | `acceptance_browser` | `playwright` | `none` = no browser checks; criteria are checked locally |
+| `impl_model` | `opus` | default model of implementation sessions; an FR can set its own `model:` |
+| `impl_effort` | `high` | default effort: `low`, `medium`, `high`, `xhigh`, `max`; an FR can set its own `effort:` |
+| `shared_paths` | `[]` | paths many FRs touch, e.g. `[package-lock.json, db/migrations]`. Two FRs that both change something under one of them never run in parallel |
 
 ## Choosing `deploy_signal`
 
@@ -61,7 +65,7 @@ it — Claude reads it there.
 |---|---|
 | **Commit and PR conventions** | e.g. "Conventional Commits, enforced by commitlint. The PR title becomes the squash-merge title and is linted. The FR id goes into the subject: `feat(checkout): coupon field (FR-012)`." |
 | **Local checks before commit** | the fast commands: `npm run typecheck`, `npm run lint`, `npm test` |
-| **CI** | which PR checks matter, how long they usually take |
+| **CI** | which PR checks matter, how long they usually take; whether pushes that change only FR documents start builds, and how that is handled (e.g. `paths-ignore` on the push trigger) |
 | **Test environment** | how a PR gets there, the URL, how to get in (SSO, Cloudflare Access, basic auth), test accounts by name or role, which data may be used |
 | **Deploy verification** | optional read-only commands that prove what runs, e.g. `kubectl -n staging get deploy -o wide` |
 | **Hard rules for this project** | what must never happen here. Point to `CLAUDE.md` sections instead of copying them |
@@ -83,7 +87,11 @@ deploy_signal: url
 deploy_version_url: https://staging.shop.example/version
 deploy_timeout_min: 20
 test_env_url: https://staging.shop.example
+test_env: shared
 acceptance_browser: playwright
+impl_model: opus
+impl_effort: high
+shared_paths: [package-lock.json, db/migrations, src/i18n]
 ---
 
 # Workflow profile

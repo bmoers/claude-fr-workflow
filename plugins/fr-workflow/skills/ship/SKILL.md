@@ -14,6 +14,14 @@ profile holds every project fact used below. A value is missing → ask, never g
 The steps run strictly in order. Each has a **gate**: if it does not hold, stop,
 show the evidence, the user decides. No improvised fixes.
 
+**Shared test environment** (`test_env: shared` and `deploy_signal` not `none`):
+only one FR at a time may be between its deploying push and its recorded
+acceptance check. Acquire `fr.sh lock acquire <ID>` right before the first push in
+step 2; exit code 3 = another FR holds it → wait in the background (60 s interval)
+and show who holds it; held longer than 120 min → ask the user whether it is
+stale. Release it with `fr.sh lock release <ID>` at the end of step 6 — and
+**before stopping at any gate**, so other FRs are not blocked.
+
 ## 0. Preflight
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh check` passes; the current branch is not
@@ -40,8 +48,22 @@ show the evidence, the user decides. No improvised fixes.
   - title per the profile (it often becomes the squash-merge title);
   - body: link to the FR doc on the branch, a short summary,
     `Refs owner/repo#N` per issue — **never** `Closes`/`Fixes` — and the
-    acceptance criteria as the test plan.
+    acceptance criteria as the test plan;
+  - no CI skip marker in title, body or any commit (see the hard rules).
 - Set `pr: <N>` in the frontmatter; it is committed in step 6.
+
+## 2a. Up to date with the base branch
+
+Other FRs may have been merged meanwhile. `gh pr view <N> --json mergeable,mergeStateStatus`
+(`UNKNOWN` right after a push → retry shortly):
+
+- `CONFLICTING`, or `BEHIND` where the branch must be up to date →
+  `git fetch origin && git merge origin/<base_branch>` in the worktree. **Merge,
+  never rebase**, never force-push.
+- Git merges cleanly → run the local checks again, push, continue.
+- Real conflicts → resolve only what is unambiguous (e.g. both sides added
+  different entries). Anything that needs a decision → `git merge --abort`, stop,
+  list the conflicting files and both sides' intent.
 
 ## 3. CI gate
 
@@ -75,6 +97,10 @@ profile's *Deploy verification* commands, if any — read-only.
 
 - Turn every acceptance criterion into a concrete check, list them, then run them
   without asking.
+- Shared test environment with `deploy_signal: url`: check that
+  `deploy_version_url` reports this PR's head SHA right **before** the first check
+  and right **after** the last. Changed in between → someone else deployed; the
+  results are void — say so and run the checks again once this PR is deployed.
 - UI with the bundled Playwright browser against the test environment; backend
   effects with the read-only means the profile names. Only the test accounts the
   profile names; none named → ask.
@@ -101,8 +127,11 @@ Only when no criterion failed, and the user accepted any unverified ones:
 - Tick only the criteria actually verified (`- [x]`); unverified ones stay open.
 - `status: in-review`.
 - Commit (`docs(fr): acceptance check <ID>` or the project's convention) and push.
-  This may run CI and the deployment again — do not wait for it.
-- `fr.sh sync <issues of the FR> --no-fetch`.
+  This runs CI and the deployment again — wanted: the commit that gets merged
+  must carry green checks. Do not wait for it — except on a shared test
+  environment: there wait for that deployment (as in step 4), then
+  `fr.sh lock release <ID>`, so the next FR does not get overwritten by it.
+- `fr.sh sync-fr <ID> --no-fetch`.
 
 ## 7. Notify and report
 

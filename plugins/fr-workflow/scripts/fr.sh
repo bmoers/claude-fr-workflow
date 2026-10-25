@@ -15,6 +15,14 @@
 #   fr.sh next-id [--no-fetch]     next free FR id
 #   fr.sh issue-frs <ref> [--no-fetch]   FRs that reference an issue
 #   fr.sh sync <ref>... [--no-fetch] [--dry-run]   upsert the backlink comment
+#   fr.sh sync-fr <ID>...|--all [--no-fetch] [--dry-run]
+#                                  sync every issue an FR references now or
+#                                  referenced earlier (from git history)
+#   fr.sh overlap [<ID>...] [--no-fetch]
+#                                  which candidates (default: all open FRs) may
+#                                  start alongside the in-progress ones: waves
+#   fr.sh lock acquire|release|status [<ID>]
+#                                  ship lock for a shared test environment
 #
 # Issue refs: owner/repo#12, #12 or 12 (default repo), a GitHub issue URL.
 # jira:KEY-123 is accepted in frontmatter but skipped by `sync` (not in v1).
@@ -97,8 +105,8 @@ do_fetch() {
   fi
 }
 
-# Frontmatter on stdin -> "id status pr issues title" (tab-separated).
-# Prints nothing for files without frontmatter or without an id.
+# Frontmatter on stdin -> "id status pr issues title areas model effort"
+# (tab-separated). Prints nothing for files without frontmatter or an id.
 parse_fm() {
   awk '
     { sub(/\r$/, "") }
@@ -114,15 +122,16 @@ parse_fm() {
     END {
       if (!done || f["id"] == "") exit
       iss = f["issues"]; gsub(/\[/, "", iss); gsub(/\]/, "", iss); gsub(/ /, "", iss)
+      ar = f["areas"]; gsub(/\[/, "", ar); gsub(/\]/, "", ar); gsub(/ /, "", ar)
       t = f["title"]; gsub(/\t/, " ", t)
-      printf "%s\t%s\t%s\t%s\t%s\n", f["id"], f["status"], f["pr"], iss, t
+      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", f["id"], f["status"], f["pr"], iss, t, ar, f["model"], f["effort"]
     }'
 }
 
 # emit <location> <ref-for-links> <path>   (frontmatter on stdin)
 emit() {
   parse_fm | awk -v loc="$1" -v ref="$2" -v p="$3" 'BEGIN { FS = OFS = "\t" }
-    { print $1, $2, loc, ref, p, $3, $4, $5 }'
+    { print $1, $2, loc, ref, p, $3, $4, $5, $6, $7, $8 }'
 }
 
 is_fr_file() {
@@ -176,16 +185,18 @@ rows() {
       for (i = 1; i <= n; i++) {
         split(row[order[i]], c, "\t")
         if (c[3] == "base" && c[2] == "in-review") c[2] = "merged"
-        print c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8]
+        print c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11]
       }
     }' | sort
 }
 
 want_fetch() { case " $* " in *" --no-fetch "*) ;; *) do_fetch ;; esac; }
 
+HEADER='id\tstatus\tlocation\tref\tpath\tpr\tissues\ttitle\tareas\tmodel\teffort\n'
+
 cmd_list() {
   want_fetch "$@"
-  printf 'id\tstatus\tlocation\tref\tpath\tpr\tissues\ttitle\n'
+  printf "$HEADER"
   rows
 }
 
@@ -205,23 +216,41 @@ cmd_next_id() {
       END { printf "%s-%0" d "d\n", pre, max + 1 }'
 }
 
+# Rows computed once per run when ROWS is set (sync loops call frs_for often).
+ROWS=""
+all_rows() { if [ -n "$ROWS" ]; then printf '%s\n' "$ROWS"; else rows; fi; }
+
+# awk: canonical issue ref from #N, N, owner/repo#N or an issue URL.
+NORM_AWK='
+  function canon(x) {
+    if (x ~ /^#/) return dr x
+    if (x ~ /^[0-9]+$/) return dr "#" x
+    if (x ~ /^https:\/\/github\.com\/[^\/]+\/[^\/]+\/issues\/[0-9]+/) {
+      sub(/^https:\/\/github\.com\//, "", x); sub(/\/issues\//, "#", x)
+      match(x, /^[^\/]+\/[^#]+#[0-9]+/); return substr(x, RSTART, RLENGTH)
+    }
+    return x
+  }'
+
 # FR rows referencing a normalized issue ref (short refs in docs normalized too).
 frs_for() {
   local ref="$1" dr
   dr=$(default_repo)
-  rows | awk -v ref="$ref" -v dr="$dr" 'BEGIN { FS = OFS = "\t" }
+  all_rows | awk -v ref="$ref" -v dr="$dr" "$NORM_AWK"'
+    BEGIN { FS = OFS = "\t" }
     {
       n = split($7, a, ",")
-      for (i = 1; i <= n; i++) {
-        x = a[i]
-        if (x ~ /^#/) x = dr x
-        else if (x ~ /^[0-9]+$/) x = dr "#" x
-        else if (x ~ /^https:\/\/github\.com\/[^\/]+\/[^\/]+\/issues\/[0-9]+/) {
-          sub(/^https:\/\/github\.com\//, "", x); sub(/\/issues\//, "#", x)
-          match(x, /^[^\/]+\/[^#]+#[0-9]+/); x = substr(x, RSTART, RLENGTH)
-        }
-        if (x == ref) { print; next }
-      }
+      for (i = 1; i <= n; i++) if (canon(a[i]) == ref) { print; next }
+    }'
+}
+
+# Issue refs an FR file listed in any committed version: hist_issues <gitref> <path>
+hist_issues() {
+  git log --format= -p "$1" -- "$2" 2>/dev/null | awk '
+    /^[-+]issues:/ {
+      s = substr($0, 2); sub(/^issues:[ \t]*/, "", s)
+      gsub(/\[/, "", s); gsub(/\]/, "", s); gsub(/ /, "", s)
+      n = split(s, a, ","); for (i = 1; i <= n; i++) if (a[i] != "") print a[i]
     }'
 }
 
@@ -229,26 +258,19 @@ cmd_issue_frs() {
   [ $# -ge 1 ] || die "usage: fr.sh issue-frs <issue-ref>"
   local ref; ref=$(norm "$1"); shift
   want_fetch "$@"
-  printf 'id\tstatus\tlocation\tref\tpath\tpr\tissues\ttitle\n'
+  printf "$HEADER"
   frs_for "$ref"
 }
 
-cmd_sync() {
+# sync_refs <dry 0|1> <ref>...   — the backlink upsert, one issue at a time
+sync_refs() {
+  local dry="$1"; shift
   command -v gh >/dev/null || die "gh not found"
-  local refs="" a dry=0
-  for a in "$@"; do
-    case "$a" in
-      --no-fetch) ;;
-      --dry-run) dry=1 ;;
-      *) refs="$refs $a" ;;
-    esac
-  done
-  [ -n "$refs" ] || die "usage: fr.sh sync <issue-ref>... [--dry-run]"
-  want_fetch "$@"
+  [ -n "$ROWS" ] || ROWS=$(rows)
 
   local frrepo raw ref irepo num table body id
   frrepo=$(cur_repo)
-  for raw in $refs; do
+  for raw in "$@"; do
     ref=$(norm "$raw")
     case "$ref" in
       jira:*) echo "skip $ref: Jira is not supported in v1"; continue ;;
@@ -292,6 +314,169 @@ cmd_sync() {
   done
 }
 
+cmd_sync() {
+  local refs="" a dry=0
+  for a in "$@"; do
+    case "$a" in
+      --no-fetch) ;;
+      --dry-run) dry=1 ;;
+      *) refs="$refs $a" ;;
+    esac
+  done
+  [ -n "$refs" ] || die "usage: fr.sh sync <issue-ref>... [--dry-run]"
+  want_fetch "$@"
+  # shellcheck disable=SC2086 # refs never contain spaces
+  sync_refs "$dry" $refs
+}
+
+# All issues of the given FRs — current frontmatter plus every earlier version,
+# so an issue removed from `issues:` loses its entry too. No issues: no-op.
+cmd_sync_fr() {
+  local ids="" a dry=0 all=0
+  for a in "$@"; do
+    case "$a" in
+      --no-fetch) ;;
+      --dry-run) dry=1 ;;
+      --all) all=1 ;;
+      *) ids="$ids $a" ;;
+    esac
+  done
+  [ -n "$ids" ] || [ "$all" = 1 ] || die "usage: fr.sh sync-fr <FR-id>...|--all [--dry-run]"
+  want_fetch "$@"
+  ROWS=$(rows)
+  [ "$all" = 1 ] && ids=$(printf '%s\n' "$ROWS" | cut -f1)
+
+  local id row loc ref path cur gref dr iss refs=""
+  dr=$(default_repo)
+  for id in $ids; do
+    row=$(printf '%s\n' "$ROWS" | awk -F '\t' -v id="$id" '$1 == id')
+    if [ -z "$row" ]; then echo "$id: no such FR"; continue; fi
+    loc=$(printf '%s' "$row" | cut -f3)
+    ref=$(printf '%s' "$row" | cut -f4)
+    path=$(printf '%s' "$row" | cut -f5)
+    cur=$(printf '%s' "$row" | cut -f7)
+    case "$loc" in
+      base) gref=$(base_ref) ;;
+      branch) if git rev-parse --verify -q "refs/remotes/origin/$ref" >/dev/null; then gref="origin/$ref"; else gref="$ref"; fi ;;
+      *) gref=HEAD ;;
+    esac
+    iss=$({ printf '%s\n' "$cur" | tr ',' '\n'; hist_issues "$gref" "$path"; } |
+      awk -v dr="$dr" "$NORM_AWK"' NF { print canon($0) }' | sort -u | tr '\n' ' ')
+    if [ -z "${iss// /}" ]; then echo "$id: no linked issues — nothing to sync"; continue; fi
+    refs="$refs $iss"
+  done
+  refs=$(printf '%s\n' $refs | sort -u | tr '\n' ' ')
+  [ -n "${refs// /}" ] || return 0
+  # shellcheck disable=SC2086
+  sync_refs "$dry" $refs
+}
+
+# Paths an FR touches: its declared `areas` plus the files its branch (or the
+# working tree, for local FRs) already changed, FR docs excluded. Nothing known
+# -> "*", which overlaps with everything: parallel only when it is evident.
+touched() { # <row>
+  local loc ref areas gref bref
+  loc=$(printf '%s' "$1" | cut -f3); ref=$(printf '%s' "$1" | cut -f4)
+  areas=$(printf '%s' "$1" | cut -f9)
+  bref=$(base_ref)
+  { printf '%s\n' "$areas" | tr ',' '\n'
+    case "$loc" in
+      branch)
+        if git rev-parse --verify -q "refs/remotes/origin/$ref" >/dev/null; then gref="origin/$ref"; else gref="$ref"; fi
+        git diff --name-only "$bref...$gref" 2>/dev/null ;;
+      local) git diff --name-only "$bref" 2>/dev/null ;;
+    esac
+  } | awk -v frdir="$FR_DIR" '
+      { sub(/\/\*\*$/, ""); sub(/\/\*$/, ""); sub(/\/$/, "") }
+      $0 == "" || $0 == frdir || index($0, frdir "/") == 1 { next }
+      { print; n++ }
+      END { if (!n) print "*" }'
+}
+
+# Every in-progress FR is running context; candidates are the given ids (default:
+# all open FRs). Wave 1 = candidates that overlap neither a running FR nor each
+# other — those can start now. Output: running, conflict and wave lines.
+cmd_overlap() {
+  local ids="" a
+  for a in "$@"; do [ "$a" = "--no-fetch" ] || ids="$ids $a"; done
+  want_fetch "$@"
+  ROWS=$(rows)
+  local running cands shared id row
+  running=$(printf '%s\n' "$ROWS" | awk -F '\t' '$2 == "in-progress" { print $1 }')
+  if [ -z "$ids" ]; then
+    ids=$(printf '%s\n' "$ROWS" | awk -F '\t' '$2 == "open" { print $1 }')
+  fi
+  # (no `case` inside $(...): bash 3.2 misparses its `)`)
+  cands=$(for id in $ids; do printf '%s\n' "$running" | grep -qxF "$id" || echo "$id"; done)
+  shared=$(cfg shared_paths "" | tr -d '[] ' | tr ',' ' ')
+  { for id in $running; do echo "R $id"; done; for id in $cands; do echo "C $id"; done; } |
+  while read -r role id; do
+    row=$(printf '%s\n' "$ROWS" | awk -F '\t' -v id="$id" '$1 == id')
+    if [ -z "$row" ]; then echo "fr.sh: no such FR: $id" >&2; continue; fi
+    touched "$row" | awk -v id="$id" -v role="$role" '{ print role "\t" id "\t" $0 }'
+  done | awk -v shared="$shared" '
+    function rel(a, b) { return a == b || index(b, a "/") == 1 || index(a, b "/") == 1 }
+    function under(p, s) { return p == s || index(p, s "/") == 1 }
+    BEGIN { FS = OFS = "\t"; ns = split(shared, sh, " ") }
+    { if (!($2 in seen)) { order[++n] = $2; seen[$2] = 1; role[$2] = $1 }; paths[$2] = paths[$2] "\n" $3 }
+    END {
+      for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++) {
+        A = order[i]; B = order[j]; why = ""
+        na = split(substr(paths[A], 2), pa, "\n"); nb = split(substr(paths[B], 2), pb, "\n")
+        for (x = 1; x <= na && why == ""; x++) for (y = 1; y <= nb && why == ""; y++) {
+          if (pa[x] == "*" || pb[y] == "*") why = "areas unknown"
+          else if (rel(pa[x], pb[y])) why = pa[x] " ~ " pb[y]
+          else for (s = 1; s <= ns && why == ""; s++)
+            if (under(pa[x], sh[s]) && under(pb[y], sh[s])) why = "shared " sh[s]
+        }
+        if (why != "") { print "conflict", A, B, why; c[A, B] = c[B, A] = 1 }
+      }
+      for (i = 1; i <= n; i++) if (role[order[i]] == "R") { wave[order[i]] = 0; print "running", order[i] }
+      for (i = 1; i <= n; i++) {
+        F = order[i]; if (role[F] == "R") continue
+        blocked = 0
+        for (k = 1; k <= n; k++) if (role[order[k]] == "R" && ((F, order[k]) in c)) blocked = 1
+        for (w = (blocked ? 2 : 1); ; w++) {
+          ok = 1
+          for (k = 1; k < i; k++) if (role[order[k]] == "C" && wave[order[k]] == w && ((F, order[k]) in c)) { ok = 0; break }
+          if (ok) { wave[F] = w; break }
+        }
+        print "wave", wave[F], F
+      }
+    }'
+}
+
+# A lock in the git dir shared by all worktrees of this clone: on a shared test
+# environment only one FR may be between its deploying push and its recorded
+# acceptance check. It protects parallel sessions on this machine only.
+cmd_lock() {
+  local sub="${1:-status}" id="${2:-}" d now holder since
+  d="$(cd "$(git rev-parse --git-common-dir)" && pwd)/fr-workflow-ship.lock"
+  now=$(date -u +%s)
+  holder=""; since=""
+  if [ -f "$d/owner" ]; then read -r holder since < "$d/owner" || true; fi
+  case "$sub" in
+    acquire)
+      [ -n "$id" ] || die "usage: fr.sh lock acquire <ID>"
+      if mkdir "$d" 2>/dev/null; then
+        printf '%s %s\n' "$id" "$now" > "$d/owner"; echo "acquired by $id"
+      elif [ "$holder" = "$id" ]; then
+        echo "already held by $id"
+      else
+        echo "busy: held by ${holder:-unknown} for $(( (now - ${since:-$now}) / 60 )) min"; exit 3
+      fi ;;
+    release)
+      [ -n "$id" ] || die "usage: fr.sh lock release <ID>"
+      if [ ! -d "$d" ]; then echo "free"
+      elif [ "$holder" = "$id" ]; then rm -f "$d/owner"; rmdir "$d"; echo "released by $id"
+      else echo "not released: held by ${holder:-unknown}, not $id"; exit 3
+      fi ;;
+    status)
+      if [ -d "$d" ]; then echo "held by ${holder:-unknown} for $(( (now - ${since:-$now}) / 60 )) min"; else echo "free"; fi ;;
+    *) die "usage: fr.sh lock acquire|release|status [<ID>]" ;;
+  esac
+}
+
 cmd_check() {
   local ok=1
   echo "repo:     $(cur_repo 2>/dev/null || echo 'MISSING origin remote')"
@@ -312,5 +497,8 @@ case "$cmd" in
   next-id) cmd_next_id "$@" ;;
   issue-frs) cmd_issue_frs "$@" ;;
   sync) cmd_sync "$@" ;;
-  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  sync-fr) cmd_sync_fr "$@" ;;
+  overlap) cmd_overlap "$@" ;;
+  lock) cmd_lock "$@" ;;
+  *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

@@ -17,10 +17,11 @@ flowchart LR
 |---|---|
 | `/fr-workflow:init` | once per repository: project profile, FR folder, team settings |
 | `/fr-workflow:new` | plan: issues and/or a discussion → one or more FR documents, each on a pushed branch |
-| `/fr-workflow:start` | build: a worktree for the FR, status `in-progress` |
+| `/fr-workflow:start` | build: a worktree per FR and a fresh session with the FR's model and effort — several non-overlapping FRs in parallel, as background sessions |
 | `/fr-workflow:ship` | finish: review gate → PR → CI → test deployment → acceptance check → result into the FR document |
-| `/fr-workflow:done` | after the merge: close fully served issues (asks first), clean up |
-| `/fr-workflow:status` | overview of all FRs, including unmerged ones |
+| `/fr-workflow:done` | after the merge — or to drop an FR: close fully served issues (asks first), clean up |
+| `/fr-workflow:status` | overview of all FRs with their sessions, and which can run in parallel |
+| `/fr-workflow:sync` | refresh the generated issue comments, e.g. after editing an FR by hand |
 
 ## Documentation
 
@@ -45,6 +46,9 @@ flowchart LR
   protected base branch after a merge.
 - **Project facts live in the project** (`.claude/workflow.md`), the process lives
   here. The plugin contains nothing customer-specific.
+- **No CI skip markers, anywhere.** A squash merge would carry them onto the base
+  branch and skip its release. Builds from planning pushes are avoided with
+  `paths-ignore` on push triggers, which `init` proposes.
 - **Hard limits:** never merges, never triggers deployments, never touches
   production, never handles credentials.
 

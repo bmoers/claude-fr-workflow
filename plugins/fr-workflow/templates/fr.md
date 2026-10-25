@@ -3,6 +3,9 @@ id: FR-000
 title: Short title
 status: open
 issues: []
+areas: []
+model:
+effort:
 pr:
 created: YYYY-MM-DD
 ---

@@ -24,6 +24,15 @@ Derive what you can from the repository; ask only for what you cannot.
 - `.github/workflows/*.yml`: what runs on `pull_request`; what deploys
   (`environment:`, `deploy`, `workflow_run`); whether a deploy posts or updates a
   PR comment; preview URLs.
+- **Builds from planning pushes.** `:new` and `:start` push commits that change
+  only `<fr_dir>`. Find workflows with an `on: push` trigger that matches FR
+  branches (no `branches:` filter, or a wildcard). For those, propose as a diff —
+  never apply it — `paths-ignore: ['<fr_dir>/**']` on the **`push`** trigger. Never
+  on `pull_request`: required checks of a PR that skips them stay pending and
+  block the merge. Never suggest CI skip markers (see the hard rules). Also note
+  services outside Actions that build every branch (Vercel, Netlify branch
+  deploys) — their ignore settings are the project's call. Record the outcome in
+  the profile's *CI* section.
 - Conventions: `commitlint.config.*`, husky hooks, PR-title lint, `CONTRIBUTING.md`.
 - Fast local checks: `package.json` scripts, `Makefile`, `pyproject.toml`.
 - `CLAUDE.md` rules on production, deployments, git.
@@ -39,6 +48,14 @@ Fill `${CLAUDE_PLUGIN_ROOT}/templates/workflow.md` with your findings. Pick
 - `url` — the test environment reports its commit SHA (`/version`, `/health`, …).
   The most robust signal when it exists.
 - `none` — no test environment per PR; `:ship` then ends after CI.
+
+Also propose:
+
+- `test_env`: `per-pr` when every PR gets its own preview; otherwise `shared`.
+- `shared_paths`: what every change tends to touch — lockfiles, a migrations
+  folder, translation files, a central route or DI registry. Look at which files
+  appear in many recent merged PRs (`git log --name-only` on the base branch).
+- `impl_model` / `impl_effort`: `opus` / `high` unless the user wants otherwise.
 
 Show the proposed profile and all open questions in one message. Typical ones:
 test environment URL and how to get in, test accounts (names or roles, never
@@ -70,6 +87,12 @@ point to the `CLAUDE.md` sections instead of copying them.
 
 ## 4. Hand over
 
-Do not commit unless the user asks. Report the files written, that teammates need
-read access to `bmoers/claude-fr-workflow` while it is private, and the next step:
-`/fr-workflow:new <issues>`.
+Do not commit unless the user asks. Report:
+
+- the files written, and the proposed CI diff if there is one;
+- that these changes must be **committed and merged into `<base_branch>` before
+  the first `/fr-workflow:new`** — every FR branch starts from
+  `origin/<base_branch>` and must see the profile;
+- that teammates need read access to `bmoers/claude-fr-workflow` while it is
+  private;
+- the next step: `/fr-workflow:new <issues>`.

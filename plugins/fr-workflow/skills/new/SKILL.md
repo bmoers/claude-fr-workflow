@@ -25,6 +25,9 @@ Any mix of:
 - `project:<owner>/<number>` → `gh project item-list <number> --owner <owner> --format json`,
   issues only; apply a status or view filter if the user names one.
 - `search:<query>` → `gh issue list -R <repo> --search "<query>"`.
+- A local file — notes, a requirements document, an FR draft, a legacy FR without
+  frontmatter → read it as the source. The new FR gets a new id; name the source
+  file in its *Technical notes*. Do not modify or move the source file.
 - A description in the conversation, without any issue.
 
 For every issue also run `fr.sh issue-frs <ref>` — it may be served by FRs already.
@@ -37,15 +40,22 @@ For every issue also run `fr.sh issue-frs <ref>` — it may be served by FRs alr
 - Ask the open questions; iterate until the scope is clear.
 - Propose the cut. This table is where m:n gets decided:
 
-  | FR | Title | Issues | Type |
-  |---|---|---|---|
-  | FR-012 | … | #12, #15 | feat |
-  | FR-013 | … | #12 | fix |
+  | FR | Title | Issues | Type | Areas | Model / effort |
+  |---|---|---|---|---|---|
+  | FR-012 | … | #12, #15 | feat | src/checkout | opus / high |
+  | FR-013 | … | #12 | fix | src/invoice/pdf | sonnet / medium |
 
   One FR = one PR that can be reviewed and accepted on its own. Split an issue
   that mixes independent changes; join issues that are the same change.
+  - **Areas:** the directories or files it will change, from reading the code —
+    as narrow as you can honestly say. They decide what may run in parallel.
+  - **Model / effort:** the profile's `impl_model` / `impl_effort` unless the FR
+    clearly warrants less (a small, local change) or more (risky, cross-cutting).
+    Say why when you deviate.
 - Wait for the user to confirm the table. Say that confirming creates and pushes
-  one branch per FR and, with `backlinks: on`, comments on the listed issues.
+  one new branch per FR — off `origin/<base_branch>`, never on their current
+  branch or the base branch — and, with `backlinks: on`, comments on the listed
+  issues.
 
 ## 3. Write each FR
 
@@ -57,8 +67,8 @@ One after another, so ids cannot collide:
 3. Create it without touching the user's checkout:
    `git worktree add -b <branch> .claude/worktrees/_new-<id-lower> origin/<base_branch>`
 4. There, write `<fr_dir>/<ID>-<slug>.md` from `${CLAUDE_PLUGIN_ROOT}/templates/fr.md`:
-   frontmatter with `status: open`, canonical `issues`, `created` = today; the
-   sections from the discussion. Acceptance criteria must be checkable on the test
+   frontmatter with `status: open`, canonical `issues`, `areas`, `model`,
+   `effort`, `created` = today; the sections from the discussion. Acceptance criteria must be checkable on the test
    environment by someone who did not write the code.
 5. Commit with the project's convention (default `docs(fr): add <ID> <title>`),
    then `git push -u origin <branch>`.
@@ -67,6 +77,8 @@ One after another, so ids cannot collide:
 
 ## 4. Link and report
 
-- `fr.sh sync <all issues of the new FRs> --no-fetch`, unless `backlinks: off`.
-- Report the final table with branch names. Next step: a fresh session, then
-  `/fr-workflow:start <ID>`.
+- `fr.sh sync-fr <ids of the new FRs> --no-fetch`, unless `backlinks: off`.
+- `fr.sh overlap <ids of the new FRs> --no-fetch`.
+- Report the final table with branch names, and which FRs can run in parallel
+  (wave 1) and which must wait, with the reason. Next step:
+  `/fr-workflow:start <ids of wave 1>` — one FR, or several at once.

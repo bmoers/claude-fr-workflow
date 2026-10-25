@@ -33,21 +33,29 @@ does not give — ask.
   title: Coupons in checkout
   status: open
   issues: [acme/shop#12, acme/shop#15]
+  areas: [src/checkout, src/api/orders]
+  model: opus
+  effort: high
   pr:
   created: 2026-10-25
   ---
   ```
 
 - `issues`: canonical refs `owner/repo#N`. Empty list is fine.
+- `areas`: the directories or files the FR is expected to change, from reading the
+  code at planning time. They decide what may run in parallel (see below).
+- `model`, `effort`: for the implementation session; empty → the profile's
+  `impl_model` / `impl_effort`.
 - `status`: `open` → `in-progress` (`:start`) → `in-review` (`:ship`, after the
-  acceptance check passed), or `dropped`. **`merged` is never written**: `fr.sh`
+  acceptance check passed), or `dropped` (`:done <ID> drop`). **`merged` is never written**: `fr.sh`
   derives it when an `in-review` FR is on the base branch. The base branch is
   usually protected, so nothing gets committed there after a merge.
 
 ## Branches and worktrees
 
-- One branch per FR, created by `:new` off the base branch and pushed with the FR
-  doc as its first commit. Name from `branch_pattern`, default
+- One branch per FR, created by `:new` off `origin/<base_branch>` in a temporary
+  worktree — never on the branch the user is on, never on the base branch — and
+  pushed with the FR doc as its first commit. Name from `branch_pattern`, default
   `{type}/{id-lower}-{slug}` → `feat/fr-012-checkout-coupons`. The branch name
   **must contain the FR number** — that is how `fr.sh` finds FR docs on branches.
 - One worktree per FR at `.claude/worktrees/<id-lower>-<slug>` (gitignored),
@@ -56,13 +64,39 @@ does not give — ask.
 - There is **no shared index file**: a table edited in every PR conflicts and
   drifts. The overview is `/fr-workflow:status`.
 
+## Parallel work
+
+- Two FRs may run at the same time when they do not touch the same paths.
+  `fr.sh overlap` compares each FR's `areas` **and** the files its branch already
+  changed; one path inside the other counts as overlap, and so do two different
+  files under one of the profile's `shared_paths` (migrations, lockfiles, i18n).
+  An FR with neither areas nor changes overlaps everything — parallel only when it
+  is evident. The result groups FRs into waves; wave 1 can start now.
+- `:start` with several FRs starts one background session per FR of wave 1
+  (`claude -w <name> --bg …`). Claude Code's own tools show them: `claude agents`,
+  `claude logs`, `claude attach`.
+- While a Claude session runs in a worktree, Claude Code locks the worktree
+  (`git worktree list` shows `locked claude session … (pid N …)`). A lock whose pid
+  no longer runs is stale and may be removed with `git worktree unlock`; a live
+  one means the session is still running — never remove its worktree.
+- Parallel PRs reach the base branch one after the other, so a later one can
+  conflict. `:ship` then **merges** `origin/<base_branch>` into the FR branch — no
+  rebase, no force push.
+- `test_env: shared` (one deployment at a time): only one FR may be between its
+  deploying push and its recorded acceptance check — `fr.sh lock`. The lock lives
+  in the git directory all worktrees of a clone share, so it covers parallel
+  sessions on one machine, not other developers. Against those, the deployed
+  commit is checked before and after the acceptance check.
+
 ## Issue backlinks
 
 - Every linked GitHub issue carries one comment, maintained by `fr.sh sync`,
   listing all FRs that reference it with status and PR. It is derived: never edit
   or write it yourself — re-run sync.
-- Sync all issues of an FR whenever its frontmatter changed **and was pushed**
-  (otherwise its link does not resolve).
+- After an FR's frontmatter changed **and was pushed** (otherwise its link does
+  not resolve), run `fr.sh sync-fr <ID>`. It syncs every issue the FR references
+  now *or referenced earlier*, so an issue taken out of `issues:` loses its entry
+  too. An FR without issues is a no-op.
 - Profile `backlinks: off` → skip sync.
 
 ## PRs and closing issues
@@ -80,10 +114,13 @@ does not give — ask.
 | Command | Does |
 |---|---|
 | `check` | prerequisites and profile |
-| `list` | all FRs as TSV: `id status location ref path pr issues title` |
+| `list` | all FRs as TSV: `id status location ref path pr issues title areas model effort` |
 | `next-id` | next free id — counts base, FR branches, local files and branch names |
 | `issue-frs <ref>` | FRs that reference an issue |
-| `sync <ref>... [--dry-run]` | create or update the backlink comment |
+| `sync <ref>... [--dry-run]` | create or update the backlink comment of these issues |
+| `sync-fr <ID>...\|--all [--dry-run]` | the same for every issue of these FRs, past links included — what the skills use |
+| `overlap [<ID>...]` | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now |
+| `lock acquire\|release\|status <ID>` | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it |
 
 `location` is `base`, `branch` (then `ref` is the branch) or `local` (uncommitted
 in this checkout). All but `check` fetch origin first; pass `--no-fetch` after
@@ -98,6 +135,11 @@ The profile and the project's `CLAUDE.md` may add rules; they never relax these.
   deploy jobs). If a deployment does not come, report it.
 - **Never touch production** — no reads, no writes — unless the user explicitly
   asks, for that one action.
+- **Never write a CI skip marker** — `[skip ci]`, `[ci skip]`, `[no ci]`,
+  `[skip actions]`, `[actions skip]`, a `skip-checks:` trailer — into a commit
+  message, PR title or PR body. A squash merge copies the branch's commit
+  messages into the commit on the base branch, and the marker would then skip the
+  base branch's release and deploy workflows.
 - No force push, no rebase of a pushed FR branch, no `reset --hard`, `restore`,
   `clean` or `stash drop` on the user's changes. Unclear changes → ask.
 - Never ask for, store or type credentials. A login wall → the user logs in

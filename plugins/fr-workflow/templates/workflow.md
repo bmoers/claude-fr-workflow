@@ -14,7 +14,11 @@ deploy_success_marker:            # pr-comment: text that means success
 deploy_version_url:               # url: endpoint whose response contains the deployed commit SHA
 deploy_timeout_min: 30
 test_env_url:                     # base URL of the test environment; {pr} = PR number
+test_env: shared                  # shared | per-pr — one deployment at a time, or one per PR
 acceptance_browser: playwright    # playwright | none
+impl_model: opus                  # default model for implementation sessions
+impl_effort: high                 # low | medium | high | xhigh | max
+shared_paths: []                  # paths every FR may touch, e.g. [package-lock.json, db/migrations]
 ---
 
 # Workflow profile
@@ -33,7 +37,9 @@ squash-merge title and is linted; FR id goes into the subject, not the type. -->
 
 ## CI
 
-<!-- which PR checks matter, typical duration -->
+<!-- which PR checks matter, typical duration; whether pushes of FR-doc-only
+commits (from :new and :start) trigger builds, and how that is handled -->
+
 
 ## Test environment
 
