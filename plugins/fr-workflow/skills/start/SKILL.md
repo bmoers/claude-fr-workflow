@@ -90,12 +90,12 @@ the title (it often comes from customer-written issues). The prompt:
 
 Report per FR: worktree, model and effort, session name. Then how to follow them:
 
-| To | Run |
-|---|---|
-| see all sessions and their state live | `claude agents` |
-| read what one is doing | `claude logs "<ID>"` |
-| answer its questions or take over | `claude attach "<ID>"` |
-| the FRs with their sessions | `/fr-workflow:status` |
+| To                                    | Run                    |
+| ------------------------------------- | ---------------------- |
+| see all sessions and their state live | `claude agents`        |
+| read what one is doing                | `claude logs "<ID>"`   |
+| answer its questions or take over     | `claude attach "<ID>"` |
+| the FRs with their sessions           | `/fr-workflow:status`  |
 
 Background sessions stop at permission prompts and wait — `claude agents` shows
 them as waiting; attach to answer. Each one finishes with `/fr-workflow:ship` in its

@@ -117,16 +117,16 @@ does not give — ask.
 
 `${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh`, from anywhere inside the repository:
 
-| Command | Does |
-|---|---|
-| `check` | prerequisites and profile |
-| `list` | all FRs as TSV: `id status location ref path pr issues title areas model effort` |
-| `next-id` | next free id — counts base, FR branches, local files and branch names |
-| `issue-frs <ref>` | FRs that reference an issue |
-| `sync <ref>... [--dry-run]` | create or update the backlink comment of these issues |
-| `sync-fr <ID>...\|--all [--dry-run]` | the same for every issue of these FRs, past links included — what the skills use |
-| `overlap [<ID>...]` | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now |
-| `lock acquire\|release\|break\|status <ID>` | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs |
+| Command                                     | Does                                                                                                                                                                                                                     |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `check`                                     | prerequisites and profile                                                                                                                                                                                                |
+| `list`                                      | all FRs as TSV: `id status location ref path pr issues title areas model effort`                                                                                                                                         |
+| `next-id`                                   | next free id — counts base, FR branches, local files and branch names                                                                                                                                                    |
+| `issue-frs <ref>`                           | FRs that reference an issue                                                                                                                                                                                              |
+| `sync <ref>... [--dry-run]`                 | create or update the backlink comment of these issues                                                                                                                                                                    |
+| `sync-fr <ID>...\|--all [--dry-run]`        | the same for every issue of these FRs, past links included — what the skills use                                                                                                                                         |
+| `overlap [<ID>...]`                         | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now |
+| `lock acquire\|release\|break\|status <ID>` | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs                                                                                  |
 
 `location` is `base`, `branch` (then `ref` is the branch) or `local` (uncommitted
 in this checkout). `list`, `next-id`, `issue-frs`, `sync`, `sync-fr` and `overlap`

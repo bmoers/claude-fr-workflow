@@ -58,6 +58,9 @@ pitfalls that the code does not show.
   first. A skill cannot invoke another one (`disable-model-invocation`), so it
   reads the other's `SKILL.md` and follows it (`idea` → `new`).
 - Every bug fixed in `fr.sh` gets a case in `tests/fr-sh.sh`.
+- Markdown tables are column-aligned, so they read in plain text too: every cell
+  padded to its column's width, separator rows as `| --- |`. Re-align the whole
+  table after any edit to it.
 
 ## Testing
 
