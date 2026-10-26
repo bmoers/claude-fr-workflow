@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.0] — 2026-10-26
+
+### Added
+
+- **One standard shape for issues:** an issue form
+  (`templates/issue-form.yml` → `.github/ISSUE_TEMPLATE/feature-request.yml`,
+  label `fr-request`) with problem, who, desired behaviour, how we know it is
+  done, priority, **size**, and optional model and effort. `init` installs it
+  (alongside existing templates, translated on request) and offers the label.
+- **`/fr-workflow:idea`:** talks an idea through along the form's fields, creates
+  the issue in the same shape after confirmation, and goes straight on to
+  planning.
+- **Model and effort from the issue,** each decided separately: explicit values
+  in the issue are binding; else the issue's size through the new profile key
+  `size_models`; else `impl_model` / `impl_effort`. A size-derived value is an
+  estimate — `new` may propose another per FR, with the reason in its table.
+- `new` maps form issues field by field into the FR doc.
+
 ## [0.3.1] — 2026-10-26
 
 Findings of the first full end-to-end run in the sandbox (new → start in

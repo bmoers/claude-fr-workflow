@@ -17,13 +17,20 @@ technical knowledge needed.
 
 ## Writing a good issue
 
-The more of these an issue answers, the faster it moves:
+On GitHub choose **New issue → Feature request**. The form asks for:
 
-- **What is the problem or the need?** In your words, not as a solution.
-- **Who is affected?** For example "customers paying by invoice", "all admins".
-- **What should happen instead?** Steps, examples, a sketch or a screenshot.
-- **How would you check that it is done?** "I enter a coupon code and the total
-  drops by 10 %." These sentences become the checks the work is tested against.
+- **Problem or need** — in your words, not as a solution.
+- **Who is affected** — for example "customers paying by invoice", "all admins".
+- **Desired behaviour** — steps, examples, a sketch or a screenshot.
+- **How do we know it is done** — sentences someone can check: "I enter a coupon
+  code and the total drops by 10 %." They become the checks the work is tested
+  against, so they matter most.
+- **Priority** — low, medium or high.
+- **Size** — your estimate: a small change, a normal feature, something larger,
+  or big and risky. "Don't know" is fine; the team adjusts it. It decides how much
+  effort goes into the implementation.
+- **Model** and **Effort** — leave them on "From size" unless you work on the
+  technical side.
 
 Please never put passwords, personal data of customers or other confidential
 information into an issue.

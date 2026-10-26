@@ -63,7 +63,9 @@ Also propose:
 - `shared_paths`: what every change tends to touch — lockfiles, a migrations
   folder, translation files, a central route or DI registry. Look at which files
   appear in many recent merged PRs (`git log --name-only` on the base branch).
-- `impl_model` / `impl_effort`: `opus` / `high` unless the user wants otherwise.
+- `impl_model` / `impl_effort`: `opus` / `high` unless the user wants otherwise;
+  `size_models`: how the issue form's *Size* maps to model and effort — the
+  template's default unless the user wants otherwise.
 
 Show the proposed profile and all open questions in one message. Typical ones:
 test environment URL and how to get in, test accounts (names or roles, never
@@ -76,6 +78,16 @@ point to the `CLAUDE.md` sections instead of copying them.
 - `<fr_dir>/README.md` from `${CLAUDE_PLUGIN_ROOT}/templates/fr-readme.md`. If a
   README exists there, propose a short section instead.
 - `.gitignore`: make sure `.claude/worktrees/` and `.playwright-mcp/` are listed.
+- `.github/ISSUE_TEMPLATE/feature-request.yml` from
+  `${CLAUDE_PLUGIN_ROOT}/templates/issue-form.yml` — the one definition of an
+  issue, for people filing on GitHub and for `/fr-workflow:idea`. Existing issue
+  templates stay; if one already serves feature requests, propose adding the
+  missing fields (at least *How do we know it is done* and *Size*) and the
+  `fr-request` label to it instead of a second form. Offer to translate the
+  form's texts into the language the issue authors use — keep the field ids.
+- The label `fr-request` in the issue repository: ask before creating it
+  (`gh label create fr-request -R <repo> --description "Feature request for the fr-workflow"`).
+  The form assigns it only if it exists.
 - `.claude/settings.json` — merge into the existing JSON, never drop keys:
 
   ```json

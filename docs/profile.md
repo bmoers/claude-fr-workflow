@@ -38,6 +38,7 @@ tokens.
 | `acceptance_browser` | `playwright` | `none` = no browser checks; criteria are checked locally |
 | `impl_model` | `opus` | default model of implementation sessions; an FR can set its own `model:` |
 | `impl_effort` | `high` | default effort: `low`, `medium`, `high`, `xhigh`, `max`; an FR can set its own `effort:` |
+| `size_models` | `"S=sonnet/low, M=sonnet/medium, L=opus/high, XL=opus/xhigh"` | how the issue form's *Size* becomes model and effort. "Don't know" → `impl_model` / `impl_effort`. Explicit model/effort in the issue win over the size |
 | `shared_paths` | `[]` | paths many FRs touch, e.g. `[package-lock.json, db/migrations]`. Two FRs that both change something under one of them never run in parallel |
 
 ## Choosing `deploy_signal`

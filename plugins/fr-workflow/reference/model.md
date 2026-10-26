@@ -5,7 +5,12 @@ Every fr-workflow skill reads this first.
 ## Terms
 
 - **Issue** — what was asked for. A GitHub issue (`jira:KEY-N` is reserved for a
-  later version).
+  later version). Its standard shape is the repository's issue form
+  (`.github/ISSUE_TEMPLATE/feature-request.yml`, label `fr-request`, template
+  `${CLAUDE_PLUGIN_ROOT}/templates/issue-form.yml`): problem, who, desired
+  behaviour, how to tell it is done, priority, **size**, optional model and
+  effort. People file it on GitHub; `/fr-workflow:idea` writes the same shape from
+  a conversation.
 - **FR** (feature request) — the unit of work: a spec with acceptance criteria,
   one branch, one worktree, one PR.
 - Issues and FRs are **m:n**. One issue may need several FRs; one FR may serve
@@ -44,8 +49,9 @@ does not give — ask.
 - `issues`: canonical refs `owner/repo#N`. Empty list is fine.
 - `areas`: the directories or files the FR is expected to change, from reading the
   code at planning time. They decide what may run in parallel (see below).
-- `model`, `effort`: for the implementation session; empty → the profile's
-  `impl_model` / `impl_effort`.
+- `model`, `effort`: for the implementation session, decided by `:new` — from
+  the issue's explicit model/effort, else its size via `size_models`, else the
+  profile's `impl_model` / `impl_effort`. Empty → `impl_model` / `impl_effort`.
 - `status`: `open` → `in-progress` (`:start`) → `in-review` (`:ship`, after the
   acceptance check passed), or `dropped` (`:done <ID> drop`). **`merged` is never written**: `fr.sh`
   derives it when an `in-review` FR is on the base branch. The base branch is

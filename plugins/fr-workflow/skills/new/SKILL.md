@@ -34,6 +34,15 @@ Any mix of:
 
 For every issue also run `fr.sh issue-frs <ref>` — it may be served by FRs already.
 
+**Issues from the form** (filed on GitHub, or by `/fr-workflow:idea`) have one
+`### <label>` section per field of `.github/ISSUE_TEMPLATE/*.yml` (the form
+labelled `fr-request`; else `${CLAUDE_PLUGIN_ROOT}/templates/issue-form.yml`).
+Map them: *Problem or need* → Problem / motivation; *Who is affected* and *Desired
+behaviour* → Desired behaviour; *How do we know it is done* → the acceptance
+criteria, rewritten so each one is checkable; *Size*, *Model*, *Effort* → model and
+effort (step 2). `_No response_` means empty. An issue without this structure is
+fine too — then the discussion has to fill those gaps.
+
 ## 2. Discuss — this session is for thinking, not for code
 
 - Summarize what was asked, per issue, in a few lines. Name contradictions, gaps
@@ -51,9 +60,21 @@ For every issue also run `fr.sh issue-frs <ref>` — it may be served by FRs alr
   that mixes independent changes; join issues that are the same change.
   - **Areas:** the directories or files it will change, from reading the code —
     as narrow as you can honestly say. They decide what may run in parallel.
-  - **Model / effort:** the profile's `impl_model` / `impl_effort` unless the FR
-    clearly warrants less (a small, local change) or more (risky, cross-cutting).
-    Say why when you deviate.
+  - **Model / effort**, decided for each of the two separately, first match wins:
+    1. explicit *Model* / *Effort* in the FR's issue(s) (not "From size");
+    2. the issue's *Size* through the profile's `size_models`
+       (e.g. `S=sonnet/low, M=sonnet/medium, L=opus/high, XL=opus/xhigh`);
+    3. the profile's `impl_model` / `impl_effort`.
+
+    An FR serving several issues takes the largest size; explicit values that
+    disagree → ask.
+
+    **Explicit model / effort in an issue are binding** — whoever filed it decided
+    them; never change them. A value derived from the *size* is an estimate of the
+    whole request: propose a different one only when the FR clearly warrants it
+    (one small FR cut from an `L` issue, or a size that plainly does not fit the
+    work), mark the deviation in the table with its reason, and let the user's
+    confirmation decide.
 - Wait for the user to confirm the table. Say that confirming creates and pushes
   one new branch per FR — off `origin/<base_branch>`, never on their current
   branch or the base branch — and, with `backlinks: on`, comments on the listed

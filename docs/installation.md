@@ -38,7 +38,7 @@ whatever other plugins and skills they use.
    {
      "extraKnownMarketplaces": {
        "claude-fr-workflow": {
-         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.3.1" }
+         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.4.0" }
        }
      },
      "enabledPlugins": { "fr-workflow@claude-fr-workflow": true }
@@ -48,8 +48,9 @@ whatever other plugins and skills they use.
    `ref` pins a version. Use the newest tag from the [changelog](../CHANGELOG.md).
 
 2. **Start Claude Code in the repository root** (`claude`) and accept the trust
-   dialog. Claude Code now installs the plugin. Type `/fr-workflow:` — seven
-   commands appear: `init`, `new`, `start`, `ship`, `done`, `status`, `sync`.
+   dialog. Claude Code now installs the plugin. Type `/fr-workflow:` — eight
+   commands appear: `init`, `idea`, `new`, `start`, `ship`, `done`, `status`,
+   `sync`.
 
 3. **Run `/fr-workflow:init`.** It looks at the repository first — CI workflows,
    commit conventions, test commands, an existing requirements folder — and then
@@ -64,6 +65,9 @@ whatever other plugins and skills they use.
    | `req/feature-requests/README.md` | a short explanation for everyone who opens the folder |
    | `.gitignore` | `.claude/worktrees/` and `.playwright-mcp/` |
    | `.claude/settings.json` | the plugin entry from step 1, if it is missing |
+   | `.github/ISSUE_TEMPLATE/feature-request.yml` | the issue form — the one standard shape of an issue; on request translated for the issue authors |
+
+   It also offers to create the label `fr-request`, which the form assigns.
 
    If CI workflows build on every push, it also proposes — as a diff, without
    applying it — to ignore the FR folder on those push triggers, so that planning
@@ -77,7 +81,7 @@ whatever other plugins and skills they use.
 
 1. Pull the base branch.
 2. Start `claude` in the repository root and accept the trust dialog.
-3. Check: `/fr-workflow:` shows the seven commands, and `/mcp` lists
+3. Check: `/fr-workflow:` shows the eight commands, and `/mcp` lists
    `plugin:fr-workflow:playwright`. If you run your own Playwright server as well,
    disable one of the two in `/mcp`.
 

@@ -1,0 +1,93 @@
+name: Feature request
+description: Ask for a change or a new feature. The team plans it into one or more feature requests (FRs).
+labels: ["fr-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe what you need in your own words — no technical knowledge needed.
+        **Never put passwords, tokens or personal data of customers into an issue.**
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or need
+      description: What is wrong or missing today, and why does it matter?
+    validations:
+      required: true
+  - type: input
+    id: who
+    attributes:
+      label: Who is affected
+      description: For example "customers paying by invoice" or "all admins".
+    validations:
+      required: true
+  - type: textarea
+    id: desired
+    attributes:
+      label: Desired behaviour
+      description: What should happen instead? Steps, examples, sketches or screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: How do we know it is done
+      description: Sentences someone can check, e.g. "I enter a coupon code and the total drops by 10 %". They become the acceptance criteria.
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - Low
+        - Medium
+        - High
+    validations:
+      required: false
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      description: Your estimate — the team may adjust it. It decides how much effort the implementation gets.
+      options:
+        - "S — a small, local change"
+        - "M — a normal feature"
+        - "L — larger, touches several areas"
+        - "XL — big or risky, needs careful work"
+        - "Don't know"
+    validations:
+      required: true
+  - type: dropdown
+    id: model
+    attributes:
+      label: Model (optional, for technical teams)
+      description: Overrides the model that follows from the size.
+      options:
+        - From size
+        - sonnet
+        - opus
+        - fable
+    validations:
+      required: false
+  - type: dropdown
+    id: effort
+    attributes:
+      label: Effort (optional, for technical teams)
+      description: Overrides the effort that follows from the size.
+      options:
+        - From size
+        - low
+        - medium
+        - high
+        - xhigh
+        - max
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Links, related issues, constraints.
+    validations:
+      required: false

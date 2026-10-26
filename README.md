@@ -15,7 +15,8 @@ flowchart LR
 
 | Command | Does |
 |---|---|
-| `/fr-workflow:init` | once per repository: project profile, FR folder, team settings |
+| `/fr-workflow:init` | once per repository: project profile, FR folder, issue form, team settings |
+| `/fr-workflow:idea` | define: talk an idea through along the issue form, create the issue, go on to planning |
 | `/fr-workflow:new` | plan: issues and/or a discussion → one or more FR documents, each on a pushed branch |
 | `/fr-workflow:start` | build: a worktree per FR and a fresh session with the FR's model and effort — several non-overlapping FRs in parallel, as background sessions |
 | `/fr-workflow:ship` | finish: code and security review → PR → CI → test deployment → acceptance check → result into the FR document |
@@ -72,6 +73,8 @@ plugins/fr-workflow/
   scripts/fr.sh                     deterministic part: FR list, ids, issue comments
   templates/                        FR document, profile, FR folder README
 docs/                               user documentation
+tests/fr-sh.sh                      regression suite for scripts/fr.sh
+CLAUDE.md                           decisions, conventions and pitfalls for maintainers
 ```
 
 **Develop and test**

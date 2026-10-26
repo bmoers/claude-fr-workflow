@@ -19,6 +19,7 @@ test_env: shared                  # shared | per-pr — one deployment at a time
 acceptance_browser: playwright    # playwright | none
 impl_model: opus                  # default model for implementation sessions
 impl_effort: high                 # low | medium | high | xhigh | max
+size_models: "S=sonnet/low, M=sonnet/medium, L=opus/high, XL=opus/xhigh"   # issue Size -> model/effort
 shared_paths: []                  # paths every FR may touch, e.g. [package-lock.json, db/migrations]
 ---
 

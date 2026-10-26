@@ -34,6 +34,30 @@ invoice change, and that #15 is exactly that invoice change. Result:
 | FR-012 | Coupon field in checkout | #12 |
 | FR-013 | Discount line on invoice | #12, #15 |
 
+## Step 0 — Define the issue
+
+Every piece of work starts as an issue in one standard shape — the repository's
+issue form (`.github/ISSUE_TEMPLATE/feature-request.yml`, set up by
+`/fr-workflow:init`): problem, who is affected, desired behaviour, **how we know it
+is done**, priority, **size**, and optionally model and effort. There are two ways
+in, and both produce the same issue:
+
+- **On GitHub:** *New issue → Feature request*. This is the way for customers and
+  anyone without Claude Code — see [for issue authors](for-issue-authors.md).
+- **In a conversation:** `/fr-workflow:idea <the idea in a few words>`. Claude talks
+  it through with you along the form's fields, asks until everything is clear,
+  proposes a size, creates the issue after you confirm it — and goes straight on
+  to planning (step 1) in the same session.
+
+**Size, model, effort.** Whoever files the issue estimates its size (`S`, `M`, `L`,
+`XL` or "don't know"); the profile's `size_models` turns that into model and
+effort for the implementation, e.g. `S → sonnet / low`, `L → opus / high`.
+Technical teams can set model and effort directly in the issue; that wins over
+the size and is **binding** — planning never changes it. A value from the size is
+an estimate: planning may propose a different one per FR — one small FR cut from
+an `L` issue does not need the large setting — shows the reason in its table, and
+you decide.
+
 ## Step 1 — Plan: `/fr-workflow:new`
 
 **When:** an issue, or a batch of issues, is ready to be worked on.
@@ -46,7 +70,10 @@ describe the feature, without any issue.
 **What happens:**
 
 1. Claude reads the issues with their comments, and checks whether FRs exist for
-   them already.
+   them already. Issues from the form are taken over field by field — the *How do
+   we know it is done* sentences become the acceptance criteria, the size gives
+   model and effort. Free-form issues work too; the discussion then fills the
+   gaps.
 2. It summarizes what was asked, names gaps and contradictions, and asks
    questions. It may read code to judge the scope — it changes nothing.
 3. It proposes the cut as a table like the one above. You adjust it until it is
