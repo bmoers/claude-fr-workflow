@@ -47,13 +47,13 @@ project, and say so — they can be planned together.
 > | FR-012 | Coupon field in checkout | merged | acme/shop#87 |
 > | FR-013 | Discount line on invoice | in-review | acme/shop#91 |
 
-| Status | In plain words |
-|---|---|
-| `open` | planned, not started |
-| `in-progress` | being built |
-| `in-review` | built and tested — waiting for the final review, possibly for your acceptance |
-| `merged` | finished and part of the product's code |
-| `dropped` | will not be done — ask the team why, if nobody has said so on the issue |
+| Status        | In plain words                                                                |
+| ------------- | ----------------------------------------------------------------------------- |
+| `open`        | planned, not started                                                          |
+| `in-progress` | being built                                                                   |
+| `in-review`   | built and tested — waiting for the final review, possibly for your acceptance |
+| `merged`      | finished and part of the product's code                                       |
+| `dropped`     | will not be done — ask the team why, if nobody has said so on the issue       |
 
 **Merged does not always mean live.** When a change reaches your production
 system depends on the project's release schedule — ask the team if it matters.

@@ -2,10 +2,10 @@
 
 Setting up fr-workflow takes two kinds of work:
 
-| Who | What | How often |
-|---|---|---|
+| Who                            | What                                                                        | How often           |
+| ------------------------------ | --------------------------------------------------------------------------- | ------------------- |
 | Whoever sets up the repository | add the plugin to the repository, run `/fr-workflow:init`, merge the result | once per repository |
-| Every developer | install the prerequisites, open the repository in Claude Code | once per machine |
+| Every developer                | install the prerequisites, open the repository in Claude Code               | once per machine    |
 
 Nobody installs the plugin by hand. The repository's `.claude/settings.json`
 names it, and Claude Code installs it for everyone who opens the repository —
@@ -13,13 +13,13 @@ whatever other plugins and skills they use.
 
 ## 1. Prerequisites — every developer
 
-| Tool | Needed for | Check |
-|---|---|---|
-| Claude Code (tested with 2.1.310) | runs the plugin | `claude --version` |
-| git | branches and worktrees | `git --version` |
-| GitHub CLI `gh`, logged in | PRs, checks, issues, comments | `gh auth status` |
-| bash | the plugin's helper script. On Windows: Git Bash, which Claude Code uses anyway | `bash --version` |
-| Node.js with `npx` | the bundled Playwright browser for acceptance checks | `npx --version` |
+| Tool                              | Needed for                                                                      | Check              |
+| --------------------------------- | ------------------------------------------------------------------------------- | ------------------ |
+| Claude Code (tested with 2.1.310) | runs the plugin                                                                 | `claude --version` |
+| git                               | branches and worktrees                                                          | `git --version`    |
+| GitHub CLI `gh`, logged in        | PRs, checks, issues, comments                                                   | `gh auth status`   |
+| bash                              | the plugin's helper script. On Windows: Git Bash, which Claude Code uses anyway | `bash --version`   |
+| Node.js with `npx`                | the bundled Playwright browser for acceptance checks                            | `npx --version`    |
 
 **While the plugin repository is private**, every developer also needs:
 
@@ -59,12 +59,12 @@ whatever other plugins and skills they use.
    whether customers should get a "ready for acceptance" comment on their issues.
    After you confirm, it writes:
 
-   | File | Content |
-   |---|---|
-   | `.claude/workflow.md` | the project profile — see [profile reference](profile.md) |
-   | `req/feature-requests/README.md` | a short explanation for everyone who opens the folder |
-   | `.gitignore` | `.claude/worktrees/` and `.playwright-mcp/` |
-   | `.claude/settings.json` | the plugin entry from step 1, if it is missing |
+   | File                                         | Content                                                                                          |
+   | -------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+   | `.claude/workflow.md`                        | the project profile — see [profile reference](profile.md)                                        |
+   | `req/feature-requests/README.md`             | a short explanation for everyone who opens the folder                                            |
+   | `.gitignore`                                 | `.claude/worktrees/` and `.playwright-mcp/`                                                      |
+   | `.claude/settings.json`                      | the plugin entry from step 1, if it is missing                                                   |
    | `.github/ISSUE_TEMPLATE/feature-request.yml` | the issue form — the one standard shape of an issue; on request translated for the issue authors |
 
    It also offers to create the label `fr-request`, which the form assigns.
@@ -128,15 +128,15 @@ the FR documents — they are plain Markdown and stay readable without the plugi
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
+| Symptom                                                                   | Likely cause                                                                                       | Fix                                                                                         |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `Plugin "fr-workflow" is enabled in project settings but isn't installed` | Claude Code could not clone the plugin repository: no read access, or git has no HTTPS credentials | check access, run `gh auth setup-git`, then `/plugin marketplace update claude-fr-workflow` |
-| No `/fr-workflow:` commands and no message | the folder is not trusted — Claude Code ignores the plugin entry there without a word | start `claude` in the repository root and accept the trust dialog |
-| The plugin is listed under **Errors** in `/plugin` | see the message there | — |
-| `profile: MISSING` when a command starts | `/fr-workflow:init` not run, or its result not merged yet | run it, merge it |
-| `gh: NOT LOGGED IN` | — | `gh auth login` |
-| `npx: command not found` when Playwright starts | Node.js missing, or not on the `PATH` of the terminal that started Claude Code | install Node.js; start `claude` from a terminal where `npx` works |
-| Playwright tools appear twice | your own server and the plugin's | disable one in `/mcp` |
-| `Workspace not trusted` when `start` launches background sessions | background sessions only run in a trusted folder | run `claude` once in the repository root and accept the trust prompt |
-| `/plugin` still shows the old version after the `ref` was raised | the session started before the pull, or only `/plugin marketplace update` ran | start a new session in the repository |
-| `/fr-workflow:…` unknown in `claude -p` | headless runs do not load project plugins | add `--plugin-dir` — see [headless runs](#headless-runs-claude--p-scripts-ci) |
+| No `/fr-workflow:` commands and no message                                | the folder is not trusted — Claude Code ignores the plugin entry there without a word              | start `claude` in the repository root and accept the trust dialog                           |
+| The plugin is listed under **Errors** in `/plugin`                        | see the message there                                                                              | —                                                                                           |
+| `profile: MISSING` when a command starts                                  | `/fr-workflow:init` not run, or its result not merged yet                                          | run it, merge it                                                                            |
+| `gh: NOT LOGGED IN`                                                       | —                                                                                                  | `gh auth login`                                                                             |
+| `npx: command not found` when Playwright starts                           | Node.js missing, or not on the `PATH` of the terminal that started Claude Code                     | install Node.js; start `claude` from a terminal where `npx` works                           |
+| Playwright tools appear twice                                             | your own server and the plugin's                                                                   | disable one in `/mcp`                                                                       |
+| `Workspace not trusted` when `start` launches background sessions         | background sessions only run in a trusted folder                                                   | run `claude` once in the repository root and accept the trust prompt                        |
+| `/plugin` still shows the old version after the `ref` was raised          | the session started before the pull, or only `/plugin marketplace update` ran                      | start a new session in the repository                                                       |
+| `/fr-workflow:…` unknown in `claude -p`                                   | headless runs do not load project plugins                                                          | add `--plugin-dir` — see [headless runs](#headless-runs-claude--p-scripts-ci)               |

@@ -29,9 +29,9 @@ The customer opened **#12** "Coupons in checkout" and **#15** "Show the discount
 on the invoice". Planning shows that coupons need a checkout change *and* an
 invoice change, and that #15 is exactly that invoice change. Result:
 
-| FR | Title | Serves |
-|---|---|---|
-| FR-012 | Coupon field in checkout | #12 |
+| FR     | Title                    | Serves   |
+| ------ | ------------------------ | -------- |
+| FR-012 | Coupon field in checkout | #12      |
 | FR-013 | Discount line on invoice | #12, #15 |
 
 ## Step 0 — Define the issue
@@ -120,15 +120,15 @@ a summary; you then run `/fr-workflow:ship` in it.
 
 Run it in the FR's worktree. It works through seven steps; each one can stop.
 
-| # | Step | Stops when |
-|---|---|---|
-| 1 | Commits locally, then reviews everything the branch changes against `main` — Claude Code's built-in `/code-review` and `/security-review`, side by side — then the project's fast local checks. **A secret always stops**, cannot be accepted, and is removed before anything is pushed | review or security findings, failing checks |
-| 2 | The first push of the code, then the PR — linking the issues with `Refs #12`, never `Closes`. If another FR was merged meanwhile and the PR conflicts, it merges `main` into the branch (no rebase, no force push) and reviews again | conflicts that need a decision |
-| 3 | Wait for CI | a check fails |
-| 4 | Wait for the test deployment, the way the profile describes | the deployment fails or does not come in time — it never starts one itself |
-| 5 | Acceptance check: every criterion becomes a concrete check, run in a browser against the test environment | a criterion fails; a login page appears (you log in yourself, in the browser window); criteria it could not verify (you decide) |
-| 6 | Write the result into the FR document, set `in-review`, push, update the issue comments | — |
-| 7 | Optionally tell the customer on the issues: "Ready for acceptance on …"; report | — |
+| #   | Step                                                                                                                                                                                                                                                                                    | Stops when                                                                                                                      |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Commits locally, then reviews everything the branch changes against `main` — Claude Code's built-in `/code-review` and `/security-review`, side by side — then the project's fast local checks. **A secret always stops**, cannot be accepted, and is removed before anything is pushed | review or security findings, failing checks                                                                                     |
+| 2   | The first push of the code, then the PR — linking the issues with `Refs #12`, never `Closes`. If another FR was merged meanwhile and the PR conflicts, it merges `main` into the branch (no rebase, no force push) and reviews again                                                    | conflicts that need a decision                                                                                                  |
+| 3   | Wait for CI                                                                                                                                                                                                                                                                             | a check fails                                                                                                                   |
+| 4   | Wait for the test deployment, the way the profile describes                                                                                                                                                                                                                             | the deployment fails or does not come in time — it never starts one itself                                                      |
+| 5   | Acceptance check: every criterion becomes a concrete check, run in a browser against the test environment                                                                                                                                                                               | a criterion fails; a login page appears (you log in yourself, in the browser window); criteria it could not verify (you decide) |
+| 6   | Write the result into the FR document, set `in-review`, push, update the issue comments                                                                                                                                                                                                 | —                                                                                                                               |
+| 7   | Optionally tell the customer on the issues: "Ready for acceptance on …"; report                                                                                                                                                                                                         | —                                                                                                                               |
 
 **When it stops,** Claude shows what it found — findings, a failing log, a
 screenshot. You decide: fix it and run `/fr-workflow:ship` again (it reuses the
@@ -201,12 +201,12 @@ and effort. FRs of later waves are not started; it says why.
 
 **Following them.**
 
-| To | Run |
-|---|---|
-| see all sessions and their state live | `claude agents` |
-| read what one is doing | `claude logs "FR-012"` (the raw terminal capture — `claude attach` is easier to read) |
-| answer its questions, or take over | `claude attach "FR-012"` |
-| see FRs and sessions side by side | `/fr-workflow:status` |
+| To                                    | Run                                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------- |
+| see all sessions and their state live | `claude agents`                                                                       |
+| read what one is doing                | `claude logs "FR-012"` (the raw terminal capture — `claude attach` is easier to read) |
+| answer its questions, or take over    | `claude attach "FR-012"`                                                              |
+| see FRs and sessions side by side     | `/fr-workflow:status`                                                                 |
 
 A background session that needs a permission waits — `claude agents` shows it;
 attach to answer. When a session is done, attach and run `/fr-workflow:ship`.
@@ -216,10 +216,10 @@ conflict; `ship` then merges `main` into its branch, or stops if a conflict need
 decision. Whether acceptance checks can run in parallel depends on the test
 environment:
 
-| `test_env` in the profile | Acceptance checks |
-|---|---|
-| `per-pr` — every PR gets its own preview | in parallel |
-| `shared` — one deployment at a time | one after the other: a lock lets one FR at a time from its deploying push to its recorded result; the others wait. With `deploy_signal: url` the deployed commit is also checked before and after the check |
+| `test_env` in the profile                | Acceptance checks                                                                                                                                                                                           |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `per-pr` — every PR gets its own preview | in parallel                                                                                                                                                                                                 |
+| `shared` — one deployment at a time      | one after the other: a lock lets one FR at a time from its deploying push to its recorded result; the others wait. With `deploy_signal: url` the deployed commit is also checked before and after the check |
 
 The lock covers the sessions on your machine. Other developers deploying to the
 same shared environment are caught by the commit check — another reason to
@@ -245,13 +245,13 @@ edits are lost.
 
 ## Statuses
 
-| Status | Meaning | Set by |
-|---|---|---|
-| `open` | planned and specified, not started | `/fr-workflow:new` |
-| `in-progress` | being implemented | `/fr-workflow:start` |
-| `in-review` | PR open, acceptance check passed | `/fr-workflow:ship` |
-| `merged` | PR merged — derived, never written: an FR in review that has reached the base branch | — |
-| `dropped` | abandoned | `/fr-workflow:done <ID> drop` |
+| Status        | Meaning                                                                              | Set by                        |
+| ------------- | ------------------------------------------------------------------------------------ | ----------------------------- |
+| `open`        | planned and specified, not started                                                   | `/fr-workflow:new`            |
+| `in-progress` | being implemented                                                                    | `/fr-workflow:start`          |
+| `in-review`   | PR open, acceptance check passed                                                     | `/fr-workflow:ship`           |
+| `merged`      | PR merged — derived, never written: an FR in review that has reached the base branch | —                             |
+| `dropped`     | abandoned                                                                            | `/fr-workflow:done <ID> drop` |
 
 ## Which pushes trigger builds
 
@@ -259,10 +259,10 @@ edits are lost.
 document; implementation sessions push nothing. Whether a planning push starts a
 build depends on the project's workflows:
 
-| Workflows trigger on | Planning pushes build? |
-|---|---|
-| `pull_request` only | no — there is no PR yet |
-| `push` to `main` only | no |
+| Workflows trigger on   | Planning pushes build?                         |
+| ---------------------- | ---------------------------------------------- |
+| `pull_request` only    | no — there is no PR yet                        |
+| `push` to `main` only  | no                                             |
 | `push` to every branch | yes, unless the workflow ignores the FR folder |
 
 For the last case `/fr-workflow:init` proposes `paths-ignore` for the FR folder on

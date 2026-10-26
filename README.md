@@ -13,26 +13,26 @@ flowchart LR
   M -->|"done"| C["served issues closed"]
 ```
 
-| Command | Does |
-|---|---|
-| `/fr-workflow:init` | once per repository: project profile, FR folder, issue form, team settings |
-| `/fr-workflow:idea` | define: talk an idea through along the issue form, create the issue, go on to planning |
-| `/fr-workflow:new` | plan: issues and/or a discussion → one or more FR documents, each on a pushed branch |
-| `/fr-workflow:start` | build: a worktree per FR and a fresh session with the FR's model and effort — several non-overlapping FRs in parallel, as background sessions |
-| `/fr-workflow:ship` | finish: code and security review → PR → CI → test deployment → acceptance check → result into the FR document |
-| `/fr-workflow:done` | after the merge — or to drop an FR: close fully served issues (asks first), clean up |
-| `/fr-workflow:status` | overview of all FRs with their sessions, and which can run in parallel |
-| `/fr-workflow:sync` | refresh the generated issue comments, e.g. after editing an FR by hand |
+| Command               | Does                                                                                                                                          |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/fr-workflow:init`   | once per repository: project profile, FR folder, issue form, team settings                                                                    |
+| `/fr-workflow:idea`   | define: talk an idea through along the issue form, create the issue, go on to planning                                                        |
+| `/fr-workflow:new`    | plan: issues and/or a discussion → one or more FR documents, each on a pushed branch                                                          |
+| `/fr-workflow:start`  | build: a worktree per FR and a fresh session with the FR's model and effort — several non-overlapping FRs in parallel, as background sessions |
+| `/fr-workflow:ship`   | finish: code and security review → PR → CI → test deployment → acceptance check → result into the FR document                                 |
+| `/fr-workflow:done`   | after the merge — or to drop an FR: close fully served issues (asks first), clean up                                                          |
+| `/fr-workflow:status` | overview of all FRs with their sessions, and which can run in parallel                                                                        |
+| `/fr-workflow:sync`   | refresh the generated issue comments, e.g. after editing an FR by hand                                                                        |
 
 ## Documentation
 
-| Page | For |
-|---|---|
-| [Installation](docs/installation.md) | setting up a repository, prerequisites for developers, updates, troubleshooting |
-| [Usage](docs/usage.md) | the workflow step by step, with an example |
-| [Profile reference](docs/profile.md) | every setting in `.claude/workflow.md`, choosing the deploy signal |
-| [For issue authors](docs/for-issue-authors.md) | customers and others who write issues — no technical knowledge needed |
-| [Model and rules](plugins/fr-workflow/reference/model.md) | the data model and the hard rules every command follows |
+| Page                                                      | For                                                                             |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| [Installation](docs/installation.md)                      | setting up a repository, prerequisites for developers, updates, troubleshooting |
+| [Usage](docs/usage.md)                                    | the workflow step by step, with an example                                      |
+| [Profile reference](docs/profile.md)                      | every setting in `.claude/workflow.md`, choosing the deploy signal              |
+| [For issue authors](docs/for-issue-authors.md)            | customers and others who write issues — no technical knowledge needed           |
+| [Model and rules](plugins/fr-workflow/reference/model.md) | the data model and the hard rules every command follows                         |
 
 ## Design decisions
 
