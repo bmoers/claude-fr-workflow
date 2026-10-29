@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`/fr-workflow:implement`:** the implementation session's own command — in
+  the worktree `start` prepared, it finds the FR from the branch, reads the FR
+  doc and the profile, implements, commits locally and never pushes; writes
+  *input* / *running* on the board when it has to ask.
+
+### Changed
+
+- **`start` hands over two short things** for one FR — the `claude -w …`
+  command without a prompt, and `/fr-workflow:implement` as the first message.
+  The one-line command with the prompt wrapped when copied from a terminal and
+  started the session without its brief. Background sessions for several FRs
+  keep the prompt (nothing is copied there).
+- Docs: raising the pin on a machine that already has the marketplace needs
+  `claude plugin marketplace remove`, a session, and
+  `claude plugin install … -s project`; never a user-scope install.
+
 ## [0.5.1] — 2026-10-29
 
 First full end-to-end run of 0.5 in the sandbox, with the board: every event

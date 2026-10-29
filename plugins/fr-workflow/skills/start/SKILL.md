@@ -90,16 +90,34 @@ Model and effort: the FR doc's `model` and `effort`, else the profile's
 
 ## 5. Start the sessions
 
-The command for an FR:
+- **One FR** → give the user two things for a fresh terminal, from the main
+  checkout: the command that opens the worktree session,
 
-```bash
-claude -w <id-lower>-<slug> --model <model> --effort <effort> -n '<ID> <clean title>' '<prompt>'
-```
+  ```bash
+  claude -w <id-lower>-<slug> --model <model> --effort <effort> -n '<ID> <clean title>'
+  ```
+
+  and `/fr-workflow:implement` as its first message — it finds the FR from the
+  branch, reads the FR doc and the profile, implements, commits, never pushes.
+  No prompt on the command line: copied from a terminal, a long line wraps and
+  breaks. If the user prefers to go on in this session: `cd` into the worktree
+  and follow `${CLAUDE_PLUGIN_ROOT}/skills/implement/SKILL.md` there.
+- **Several FRs** → start each one in the background yourself, adding `--bg`,
+  from the main worktree, with the prompt below as the initial message:
+
+  ```bash
+  claude -w <id-lower>-<slug> --bg --model <model> --effort <effort> -n '<ID> <clean title>' '<prompt>'
+  ```
+
+  It prints the session id. If it answers *Workspace not trusted*, the user
+  must run `claude` once in the repository and accept the trust prompt — never
+  work around it.
 
 `-w` with an existing name opens that worktree on its FR branch; it does not
-create a new one. Both quoted values go in **single quotes**, and contain no
+create a new one. The quoted values go in **single quotes**, and contain no
 single quotes, double quotes, backticks, `$` or backslashes — remove them from
-the title (it often comes from customer-written issues). The prompt:
+the title (it often comes from customer-written issues). The prompt for a
+background session:
 
 > Implement <ID>. First run git branch --show-current: it must print <branch>, else
 > stop and say so. Read <fr_dir>/<file> - it is your whole brief - and
@@ -109,17 +127,11 @@ the title (it often comes from customer-written issues). The prompt:
 > review. Never merge. When done, stop with a short summary of what you did and
 > what is open; the user then runs /fr-workflow:ship here.
 
-- **One FR** → give the user the command for a fresh terminal. If they prefer to go
-  on in this session: switch into the worktree and read the FR doc first.
-- **Several FRs** → start each one in the background yourself, adding `--bg`, from
-  the main worktree. It prints the session id. If it answers *Workspace not
-  trusted*, the user must run `claude` once in the repository and accept the
-  trust prompt — never work around it.
-
 ## 6. Hand over
 
 Report per FR: worktree, model and effort, session name, and whether the code had
-moved since the definition. Then how to follow them:
+moved since the definition; for one FR the command and `/fr-workflow:implement`.
+Then how to follow them:
 
 | To                                    | Run                    |
 | ------------------------------------- | ---------------------- |

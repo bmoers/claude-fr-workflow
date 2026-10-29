@@ -33,7 +33,7 @@ Every fr-workflow skill reads this first.
 | Step                     | The spec is                                           | Status                                                    |
 | ------------------------ | ----------------------------------------------------- | --------------------------------------------------------- |
 | defined — `:new`         | the FR issue                                          | `open` — derived: open issue, label `fr`, no FR doc yet   |
-| started — `:start`       | the FR doc on the FR's branch, written from the issue | `in-progress`                                             |
+| started — `:start`       | the FR doc on the FR's branch, written from the issue | `in-progress` — `:implement` builds it in the worktree    |
 | shipped — `:ship`        | the FR doc, with the acceptance check                 | `in-review`                                               |
 | merged — by the user     | the FR doc on the base branch                         | `merged` — derived: an `in-review` doc on the base branch |
 | dropped — `:done … drop` | the FR doc, or only the issue if never started        | `dropped`                                                 |
@@ -175,15 +175,15 @@ plugin's events to the board's own values (`defined=Ready, running=In progress,
 …`; the column is `project_status_field`, default `Status`); an event without a
 value writes nothing. `fr.sh project-status <issue> <event>`:
 
-| Event      | Written by        | When                                                                                                                             |
-| ---------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `defined`  | `:new`            | the FR issue is written and ready — no open questions                                                                            |
-| `input`    | `:new`, `:ship`   | a skill stops with a question: open questions left on purpose, unclear uncommitted changes, unverified criteria, a login wall    |
-| `running`  | `:start`, `:ship` | branch, worktree and session exist; a resumed FR; `:ship` starts                                                                 |
-| `failed`   | `:ship`           | a gate found a defect in the change: review or security findings under `stop`, a secret, red CI, a failed criterion              |
-| `blocked`  | `:ship`           | something outside the change holds it up: the ship lock, a deployment that does not come, a merge conflict that needs a decision |
-| `approval` | `:ship`           | finished: PR open, acceptance check recorded — the merge is the user's                                                           |
-| `done`     | `:done`           | merged or dropped                                                                                                                |
+| Event      | Written by                      | When                                                                                                                                                             |
+| ---------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `defined`  | `:new`                          | the FR issue is written and ready — no open questions                                                                                                            |
+| `input`    | `:new`, `:implement`, `:ship`   | a skill stops with a question: open questions left on purpose, a decision only the user can take, unclear uncommitted changes, unverified criteria, a login wall |
+| `running`  | `:start`, `:implement`, `:ship` | branch, worktree and session exist; a resumed FR; `:implement` goes on after an answer; `:ship` starts                                                           |
+| `failed`   | `:ship`                         | a gate found a defect in the change: review or security findings under `stop`, a secret, red CI, a failed criterion                                              |
+| `blocked`  | `:ship`                         | something outside the change holds it up: the ship lock, a deployment that does not come, a merge conflict that needs a decision                                 |
+| `approval` | `:ship`                         | finished: PR open, acceptance check recorded — the merge is the user's                                                                                           |
+| `done`     | `:done`                         | merged or dropped                                                                                                                                                |
 
 Best effort by design: exit 5 means *not written*, with the reason — a `gh`
 older than 2.97, no `project` scope on the token, no project of that title

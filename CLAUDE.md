@@ -46,6 +46,11 @@ pitfalls that the code does not show.
   confirmation.
 - No shared index file; `merged` is derived (an `in-review` doc on the base
   branch), never written.
+- The implementation session is opened by the user (`claude -w <worktree>`)
+  and briefed by `/fr-workflow:implement`, not by a prompt on the command line
+  (0.5.2): a long quoted prompt wraps when copied from a terminal and the
+  session starts without it. Background sessions (`start` with several FRs)
+  still get the prompt as an argument — nothing is copied there.
 - `new` writes only to GitHub. An FR's branch is created by `start` off
   `origin/<base>` in its worktree, the FR doc as first commit — never on the
   user's branch or the base branch.

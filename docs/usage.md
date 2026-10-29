@@ -111,14 +111,17 @@ End the session here.
   prepares the worktree `.claude/worktrees/fr-20-coupon-field-checkout`. It never
   commits to the branch you are on, nor to `main`.
 - Hands you the command for a fresh session in the worktree, with the model and
-  effort chosen for this FR:
+  effort chosen for this FR, and the first message to type there:
 
   ```bash
-  claude -w fr-20-coupon-field-checkout --model opus --effort high -n 'FR-20 Coupon field in checkout' 'Implement FR-20. …'
+  claude -w fr-20-coupon-field-checkout --model opus --effort high -n 'FR-20 Coupon field in checkout'
   ```
 
-  `-w` opens the worktree that `start` just prepared, on the FR's branch. As a
-  safety net the session first checks that it is on that branch and stops if not.
+  then `/fr-workflow:implement`. `-w` opens the worktree that `start` just
+  prepared, on the FR's branch; `implement` checks that it is on that branch,
+  reads the FR document and the profile, and builds. Prefer to stay in the
+  session that ran `start`? Say so — it switches into the worktree and does
+  the same there.
 
 From here the FR document is the source: decisions and deviations go into it, in
 the same commits as the code — the issue keeps the spec as it was. The session

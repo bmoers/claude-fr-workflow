@@ -14,14 +14,15 @@ flowchart LR
   M -->|"done"| C["requests closed<br/>when fully served"]
 ```
 
-| Command               | Does                                                                                                                                       |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/fr-workflow:init`   | once per repository: project profile, FR folder, issue form, labels, team settings                                                         |
-| `/fr-workflow:new`    | define: an idea or GitHub issues, worked out with the code into FR issues that hold the full spec — local first or GitHub first            |
-| `/fr-workflow:start`  | build: pulls the FR issue, checks it against the current code, then branch, FR doc, worktree and a fresh session — several FRs in parallel |
-| `/fr-workflow:ship`   | finish: code and security review → PR → CI → test deployment → acceptance check → result into the FR document                              |
-| `/fr-workflow:done`   | after the merge — or to drop an FR: close fully served requests (asks first), clean up                                                     |
-| `/fr-workflow:status` | overview of all FRs with their sessions, the requests still to define, and which FRs can run in parallel                                   |
+| Command                  | Does                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/fr-workflow:init`      | once per repository: project profile, FR folder, issue form, labels, team settings                                                         |
+| `/fr-workflow:new`       | define: an idea or GitHub issues, worked out with the code into FR issues that hold the full spec — local first or GitHub first            |
+| `/fr-workflow:start`     | build: pulls the FR issue, checks it against the current code, then branch, FR doc, worktree and a fresh session — several FRs in parallel |
+| `/fr-workflow:implement` | in the worktree session: the FR doc is the brief — implements, commits locally, never pushes                                               |
+| `/fr-workflow:ship`      | finish: code and security review → PR → CI → test deployment → acceptance check → result into the FR document                              |
+| `/fr-workflow:done`      | after the merge — or to drop an FR: close fully served requests (asks first), clean up                                                     |
+| `/fr-workflow:status`    | overview of all FRs with their sessions, the requests still to define, and which FRs can run in parallel                                   |
 
 ## Documentation
 
