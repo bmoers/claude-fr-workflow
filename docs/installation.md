@@ -104,15 +104,17 @@ Repositories pin a version, so nobody gets changes by surprise.
    claude plugin marketplace remove claude-fr-workflow
    ```
 
-   then, in the repository:
+   then **start `claude` in the repository** — an interactive session; a
+   headless `claude -p` registers nothing — and accept the plugin when asked:
+   that registers the marketplace at the pinned `ref`. Then, in the
+   repository:
 
    ```
-   claude -p 'ok'                                            # registers the marketplace at the pinned ref
    claude plugin install fr-workflow@claude-fr-workflow -s project
    claude plugin list                                        # Version: the new tag, Scope: project
    ```
 
-   and start a new Claude Code session. `/plugin marketplace update` on its own
+   and start a new session. `/plugin marketplace update` on its own
    is not enough — it refreshes the marketplace at the `ref` it was registered
    with, i.e. the old version. One machine, one `ref`: repositories that share
    a machine raise their pins together. Never install the plugin at user scope

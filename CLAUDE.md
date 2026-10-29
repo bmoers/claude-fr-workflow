@@ -112,9 +112,10 @@ pitfalls that the code does not show.
   the pinned version. Prompts must carry the user's confirmations — skills stop
   at their gates otherwise.
 - A raised pin takes effect only after `claude plugin marketplace remove
-  claude-fr-workflow`, a session in the repository (`claude -p 'ok'` is
-  enough — it registers the marketplace at the pinned `ref`) and
-  `claude plugin install fr-workflow@claude-fr-workflow -s project` there: the
+  claude-fr-workflow`, an **interactive** `claude` start in the repository (it
+  registers the marketplace at the pinned `ref`; a headless `claude -p` does
+  not) and `claude plugin install fr-workflow@claude-fr-workflow -s project`
+  there: the
   marketplace is registered once per machine with the first `ref` it was
   brought with, and `/plugin marketplace update` keeps following that `ref`.
   One `ref` per machine — the sandbox and any client repository on the same
