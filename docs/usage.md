@@ -260,10 +260,13 @@ The board shows, it does not drive. The commands write the status column at
 their events and never read it; what runs is decided by the issues (label
 `fr`, their *Planning*) and by the command you type. In practice:
 
-- **Intake.** Requests arrive through the issue form (label `fr-request`). Add
-  `label:fr-request` to the project's *Auto-add* filter if you want them on the
-  board too — in a column of their own, they have no status event — or keep the
-  board to FRs and triage requests in the issue list.
+- **Intake.** Requests arrive through the issue form (label `fr-request`): a
+  wish, not checked against the code, not startable. An FR issue (label `fr`)
+  is the worked-out spec, one PR each; only those can start. To see both on
+  the board, give it a column for wishes — *Backlog* — with the *Auto-add*
+  filter `is:issue label:fr,fr-request` and *Item added to project* → *Backlog*:
+  requests stay there until `new` works them out, FR issues leave it at once
+  because `new` writes *Ready* right after creating them.
 - **Definition.** `/fr-workflow:new #<request>` or `/fr-workflow:new <idea>`
   turns them into FR issues: cards in *Ready*, or in *Waiting for Input* when a
   question was left open. Answer on the issue, then `/fr-workflow:new #<n>`

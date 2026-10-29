@@ -113,8 +113,11 @@ value for. Values the column does not have yet: `fr.sh project-options` (from
 the repository, with the profile in place) adds them, grey, and keeps every
 existing option with its id, colour and text; `init` offers it. The project's
 workflows have no API — set them on its *Workflows* page: *Item added to
-project* → your `defined` value, *Item closed* → your `done` value, *Auto-add
-to project* with `is:issue label:fr`. Writing the board is best effort: a `gh` older than 2.97, a missing
+project* → your `defined` value, or a column for requests such as *Backlog*
+when they are on the board too (`fr.sh project-options Backlog` adds it; FR
+issues leave it as soon as `new` writes the `defined` value), *Item closed* →
+your `done` value, *Auto-add to project* with `is:issue label:fr` — or
+`is:issue label:fr,fr-request` to add requests as well. Writing the board is best effort: a `gh` older than 2.97, a missing
 `project` scope (`gh auth refresh -s project`), a title that does not match
 (`gh project list --owner <owner>`; case does not matter) or an unknown value
 is reported by the command and never stops it. The project must belong to the
