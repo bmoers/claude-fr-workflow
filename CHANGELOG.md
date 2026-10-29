@@ -1,5 +1,80 @@
 # Changelog
 
+## [0.5.0] — 2026-10-29
+
+**Breaking:** the issue is the spec until the start. FR docs written by earlier
+versions keep working once started; FRs planned with 0.4 but not started have no
+FR issue — define them again with `/fr-workflow:new`.
+
+### Changed
+
+- **`/fr-workflow:new` defines FRs as GitHub issues** (label `fr`) that hold the
+  full spec — from an idea (local first) or from requests filed on GitHub
+  (GitHub first), worked out with the code. A request that is one change
+  becomes the FR itself (its original text kept at the end), one that needs
+  several gets a sub-issue per FR; an FR serving several requests lists them
+  under *Requests*. `new` writes only to GitHub — no branch, no push — and adds
+  the FR issues to the GitHub project named by the new profile key `project`.
+  Authors of rewritten or split requests get a short note.
+- **The FR id is the issue number:** issue #47 is `FR-47`, its branch
+  `feat/fr-47-…`. No more id allocation or renumbering.
+- **`/fr-workflow:start` pulls the FR issue:** it refuses one that is not ready
+  (no acceptance criteria, open questions), shows what changed in the FR's areas
+  since the commit the spec was based on, then creates the branch with the FR
+  doc as its first commit (`fr.sh spec`), the worktree and the session. From
+  then on the FR doc is the source.
+- **PRs say `Closes` for the FR's own issue** and `Refs` for its requests; `done`
+  closes the FR issue if the merge did not, and a request once all its FRs are
+  closed — after confirmation, as before. Dropping an FR closes its issue as
+  *not planned*, or sends a rewritten request back to `fr-request`.
+- `fr.sh list` and `overlap` include FRs not started yet, from their issue's
+  *Planning*; `fr.sh issue-frs` reads the FRs of a request from GitHub
+  (sub-issues and mentions); `status` also lists the requests still to define.
+- FR doc frontmatter: `issue`, `requests`, `based_on`, `started` instead of
+  `issues`, `created`.
+
+### Removed
+
+- `/fr-workflow:idea` — `/fr-workflow:new` with an idea does it.
+- `/fr-workflow:sync`, `fr.sh sync`, `sync-fr`, `next-id` and the backlink
+  comments on issues: GitHub's sub-issues and mentions show the link.
+- Profile keys `backlinks` and `id_digits`.
+
+### Added
+
+- **Review agents in `ship`:** the plugin brings `silent-failure-hunter`
+  (swallowed errors, broad catches, fallbacks that hide problems) and
+  `type-design-analyzer` (invariants and encapsulation of new or reshaped
+  types), adapted from Anthropic's `pr-review-toolkit` (Apache-2.0): scoped to
+  the FR's range and its FR doc, the project's own conventions instead of those
+  of Anthropic's codebase, read-only. `ship` runs those in the new profile key
+  `review_agents` beside `/code-review` and `/security-review`, and again after
+  every fix; their findings follow `review_gate`. `review_agents` defaults to
+  `[silent-failure-hunter]`, also in older profiles — expect more findings under
+  `review_gate: stop`; `review_agents: []` turns it off
+  ([profile](docs/profile.md#review-agents)). `init` proposes
+  `type-design-analyzer` for typed codebases.
+- **Failure behaviour in the FR spec:** `new` settles what happens when something
+  fails, into a new section — the spec the silent-failure review checks against.
+  Invariants of new or reshaped data types go into *Technical notes*.
+- `init` creates the labels `fr-request` and `fr` (after asking) and proposes a
+  GitHub project.
+
+### Fixed
+
+- `fr.sh`: a branch without merge base ended the branch loop of `list`, hiding
+  every FR branch sorted after it.
+
+### Upgrade notes
+
+- Create the label `fr` in the issue repository
+  (`gh label create fr -R <repo>`), or run `/fr-workflow:init` again.
+- Remove `backlinks` and `id_digits` from the profile; add `project` if the FR
+  issues should go into a GitHub project (`gh auth refresh -s project` on every
+  machine that runs `new`).
+- Old backlink comments on issues are no longer updated; delete them if they
+  confuse.
+
 ## [0.4.0] — 2026-10-26
 
 ### Added

@@ -1,24 +1,16 @@
----
-id: FR-000
-title: Short title
-status: open
-issues: []
-areas: []
-model:
-effort:
-pr:
-created: YYYY-MM-DD
----
-
-# FR-000: Short title
-
 ## Problem / motivation
 
-Why is this needed? Who asked for it (see the linked issues)?
+Why is this needed, and for whom?
 
 ## Desired behaviour
 
 What should happen — user stories or a description.
+
+## Failure behaviour
+
+What happens when something this FR depends on fails — what the user sees,
+retries, what is logged. A fallback not described here is a finding in the
+review of `/fr-workflow:ship`.
 
 ## Scope
 
@@ -35,11 +27,18 @@ write the code.
 
 ## Technical notes
 
-First ideas for the implementation, affected areas, dependencies. Keep decisions
-and deviations made during implementation here as well.
+How it fits into the existing code: the places to change, dependencies, the
+invariants of new or reshaped data types.
 
 ## Open questions
 
-## Acceptance check
+None.
 
-Filled in by `/fr-workflow:ship`.
+## Planning
+
+- Areas: src/example
+- Size: M
+- Model: opus
+- Effort: high
+- Based on: 0000000
+- Requests: none

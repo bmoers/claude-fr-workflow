@@ -13,13 +13,13 @@ whatever other plugins and skills they use.
 
 ## 1. Prerequisites — every developer
 
-| Tool                              | Needed for                                                                      | Check              |
-| --------------------------------- | ------------------------------------------------------------------------------- | ------------------ |
-| Claude Code (tested with 2.1.310) | runs the plugin                                                                 | `claude --version` |
-| git                               | branches and worktrees                                                          | `git --version`    |
-| GitHub CLI `gh`, logged in        | PRs, checks, issues, comments                                                   | `gh auth status`   |
-| bash                              | the plugin's helper script. On Windows: Git Bash, which Claude Code uses anyway | `bash --version`   |
-| Node.js with `npx`                | the bundled Playwright browser for acceptance checks                            | `npx --version`    |
+| Tool                              | Needed for                                                                                                   | Check              |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------ |
+| Claude Code (tested with 2.1.310) | runs the plugin                                                                                              | `claude --version` |
+| git                               | branches and worktrees                                                                                       | `git --version`    |
+| GitHub CLI `gh`, logged in        | issues, PRs, checks; with a `project` in the profile also the `project` scope (`gh auth refresh -s project`) | `gh auth status`   |
+| bash                              | the plugin's helper script. On Windows: Git Bash, which Claude Code uses anyway                              | `bash --version`   |
+| Node.js with `npx`                | the bundled Playwright browser for acceptance checks                                                         | `npx --version`    |
 
 **While the plugin repository is private**, every developer also needs:
 
@@ -38,7 +38,7 @@ whatever other plugins and skills they use.
    {
      "extraKnownMarketplaces": {
        "claude-fr-workflow": {
-         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.4.0" }
+         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.5.0" }
        }
      },
      "enabledPlugins": { "fr-workflow@claude-fr-workflow": true }
@@ -48,40 +48,42 @@ whatever other plugins and skills they use.
    `ref` pins a version. Use the newest tag from the [changelog](../CHANGELOG.md).
 
 2. **Start Claude Code in the repository root** (`claude`) and accept the trust
-   dialog. Claude Code now installs the plugin. Type `/fr-workflow:` — eight
-   commands appear: `init`, `idea`, `new`, `start`, `ship`, `done`, `status`,
-   `sync`.
+   dialog. Claude Code now installs the plugin. Type `/fr-workflow:` — six
+   commands appear: `init`, `new`, `start`, `ship`, `done`, `status`.
 
 3. **Run `/fr-workflow:init`.** It looks at the repository first — CI workflows,
    commit conventions, test commands, an existing requirements folder — and then
    proposes a project profile and asks only what it could not find out, typically:
-   the test environment's URL and how to get in, which test accounts to use, and
-   whether customers should get a "ready for acceptance" comment on their issues.
+   the test environment's URL and how to get in, which test accounts to use, the
+   GitHub project for the FR issues, and whether customers should get a "ready
+   for acceptance" comment on their issues.
    After you confirm, it writes:
 
-   | File                                         | Content                                                                                          |
-   | -------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-   | `.claude/workflow.md`                        | the project profile — see [profile reference](profile.md)                                        |
-   | `req/feature-requests/README.md`             | a short explanation for everyone who opens the folder                                            |
-   | `.gitignore`                                 | `.claude/worktrees/` and `.playwright-mcp/`                                                      |
-   | `.claude/settings.json`                      | the plugin entry from step 1, if it is missing                                                   |
-   | `.github/ISSUE_TEMPLATE/feature-request.yml` | the issue form — the one standard shape of an issue; on request translated for the issue authors |
+   | File                                         | Content                                                                              |
+   | -------------------------------------------- | ------------------------------------------------------------------------------------ |
+   | `.claude/workflow.md`                        | the project profile — see [profile reference](profile.md)                            |
+   | `req/feature-requests/README.md`             | a short explanation for everyone who opens the folder                                |
+   | `.gitignore`                                 | `.claude/worktrees/` and `.playwright-mcp/`                                          |
+   | `.claude/settings.json`                      | the plugin entry from step 1, if it is missing                                       |
+   | `.github/ISSUE_TEMPLATE/feature-request.yml` | the issue form — the shape of a request; on request translated for the issue authors |
 
-   It also offers to create the label `fr-request`, which the form assigns.
+   It also offers to create the labels `fr-request` (requests — the form assigns
+   it) and `fr` (specified FRs).
 
    If CI workflows build on every push, it also proposes — as a diff, without
-   applying it — to ignore the FR folder on those push triggers, so that planning
-   commits do not start builds. It does not commit.
+   applying it — to ignore the FR folder on those push triggers, so that the first
+   push of a new FR branch, which holds only the FR document, does not start a
+   build. It does not commit.
 
 4. **Commit and merge into the base branch** — through a PR if the branch is
-   protected. Do this **before the first `/fr-workflow:new`**: every FR branch
+   protected. Do this **before the first `/fr-workflow:start`**: every FR branch
    starts from the base branch and must see the profile.
 
 ## 3. Every developer — first time
 
 1. Pull the base branch.
 2. Start `claude` in the repository root and accept the trust dialog.
-3. Check: `/fr-workflow:` shows the eight commands, and `/mcp` lists
+3. Check: `/fr-workflow:` shows the six commands, and `/mcp` lists
    `plugin:fr-workflow:playwright`. If you run your own Playwright server as well,
    disable one of the two in `/mcp`.
 
@@ -135,6 +137,7 @@ the FR documents — they are plain Markdown and stay readable without the plugi
 | The plugin is listed under **Errors** in `/plugin`                        | see the message there                                                                              | —                                                                                           |
 | `profile: MISSING` when a command starts                                  | `/fr-workflow:init` not run, or its result not merged yet                                          | run it, merge it                                                                            |
 | `gh: NOT LOGGED IN`                                                       | —                                                                                                  | `gh auth login`                                                                             |
+| `/fr-workflow:new` cannot add an issue to the project                     | the `gh` token lacks the `project` scope                                                           | `gh auth refresh -s project`                                                                |
 | `npx: command not found` when Playwright starts                           | Node.js missing, or not on the `PATH` of the terminal that started Claude Code                     | install Node.js; start `claude` from a terminal where `npx` works                           |
 | Playwright tools appear twice                                             | your own server and the plugin's                                                                   | disable one in `/mcp`                                                                       |
 | `Workspace not trusted` when `start` launches background sessions         | background sessions only run in a trusted folder                                                   | run `claude` once in the repository root and accept the trust prompt                        |

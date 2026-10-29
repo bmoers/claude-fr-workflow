@@ -24,9 +24,9 @@ Derive what you can from the repository; ask only for what you cannot.
 - `.github/workflows/*.yml`: what runs on `pull_request`; what deploys
   (`environment:`, `deploy`, `workflow_run`); whether a deploy posts or updates a
   PR comment; preview URLs.
-- **Builds from planning pushes.** `:new` and `:start` push commits that change
-  only `<fr_dir>`. Find workflows with an `on: push` trigger that matches FR
-  branches (no `branches:` filter, or a wildcard). For those, propose as a diff —
+- **Builds from planning pushes.** `:start` pushes a new FR branch whose only
+  commit adds the FR doc under `<fr_dir>`. Find workflows with an `on: push`
+  trigger that matches FR branches (no `branches:` filter, or a wildcard). For those, propose as a diff —
   never apply it — `paths-ignore: ['<fr_dir>/**']` on the **`push`** trigger. Never
   on `pull_request`: required checks of a PR that skips them stay pending and
   block the merge. Never suggest CI skip markers (see the hard rules). Also note
@@ -66,10 +66,19 @@ Also propose:
 - `impl_model` / `impl_effort`: `opus` / `high` unless the user wants otherwise;
   `size_models`: how the issue form's *Size* maps to model and effort — the
   template's default unless the user wants otherwise.
+- `review_agents`: add `type-design-analyzer` when the code is mostly in a typed
+  language and models its own domain types (TypeScript, Java, C#, Kotlin, Rust,
+  Go, Swift, typed Python); otherwise keep the default.
+- `project`: a GitHub project the FR issues go into, by its title — existing
+  ones: `gh project list --owner <owner>`. Optional. Adding issues needs the
+  `project` scope on the token (`gh auth status` lists the scopes;
+  `gh auth refresh -s project` adds it).
 
 Show the proposed profile and all open questions in one message. Typical ones:
 test environment URL and how to get in, test accounts (names or roles, never
-passwords), `issue_repo`, whether `notify_issues` is wanted. For project rules,
+passwords), `issue_repo` — the FR issues live there too, as specs readable by
+everyone who reads that repository — `project`, whether `notify_issues` is
+wanted. For project rules,
 point to the `CLAUDE.md` sections instead of copying them.
 
 ## 3. Write — after the user confirmed
@@ -79,15 +88,18 @@ point to the `CLAUDE.md` sections instead of copying them.
   README exists there, propose a short section instead.
 - `.gitignore`: make sure `.claude/worktrees/` and `.playwright-mcp/` are listed.
 - `.github/ISSUE_TEMPLATE/feature-request.yml` from
-  `${CLAUDE_PLUGIN_ROOT}/templates/issue-form.yml` — the one definition of an
-  issue, for people filing on GitHub and for `/fr-workflow:idea`. Existing issue
-  templates stay; if one already serves feature requests, propose adding the
+  `${CLAUDE_PLUGIN_ROOT}/templates/issue-form.yml` — the shape of a request, as
+  `/fr-workflow:new` reads it. Existing issue templates stay; if one already serves feature requests, propose adding the
   missing fields (at least *How do we know it is done* and *Size*) and the
   `fr-request` label to it instead of a second form. Offer to translate the
   form's texts into the language the issue authors use — keep the field ids.
-- The label `fr-request` in the issue repository: ask before creating it
-  (`gh label create fr-request -R <repo> --description "Feature request for the fr-workflow"`).
-  The form assigns it only if it exists.
+- The labels in the issue repository — ask before creating them:
+  `fr-request` for requests (the form assigns it only if it exists) and `fr` for
+  specified FRs:
+  `gh label create fr-request -R <repo> --description "Feature request, to be specified"`,
+  `gh label create fr -R <repo> --description "Feature request, specified"`. A
+  label `fr` that exists with another meaning (French, say) → stop and tell the
+  user: the plugin needs `fr` for FR issues.
 - `.claude/settings.json` — merge into the existing JSON, never drop keys:
 
   ```json
@@ -111,8 +123,11 @@ Do not commit unless the user asks. Report:
 
 - the files written, and the proposed CI diff if there is one;
 - that these changes must be **committed and merged into `<base_branch>` before
-  the first `/fr-workflow:new`** — every FR branch starts from
+  the first `/fr-workflow:start`** — every FR branch starts from
   `origin/<base_branch>` and must see the profile;
 - that teammates need read access to `bmoers/claude-fr-workflow` while it is
   private;
-- the next step: `/fr-workflow:new <issues>`.
+- with `project`: GitHub's built-in project workflows move the cards — *Item
+  closed* → Done is on by default; *Auto-add to project* with the filter
+  `label:fr` also catches FR issues written by hand;
+- the next step: `/fr-workflow:new` with an idea, or with issues.

@@ -4,66 +4,118 @@ Every fr-workflow skill reads this first.
 
 ## Terms
 
-- **Issue** — what was asked for. A GitHub issue (`jira:KEY-N` is reserved for a
-  later version). Its standard shape is the repository's issue form
-  (`.github/ISSUE_TEMPLATE/feature-request.yml`, label `fr-request`, template
-  `${CLAUDE_PLUGIN_ROOT}/templates/issue-form.yml`): problem, who, desired
-  behaviour, how to tell it is done, priority, **size**, optional model and
-  effort. People file it on GitHub; `/fr-workflow:idea` writes the same shape from
-  a conversation.
+- **Request** — what someone asked for: a GitHub issue with the label
+  `fr-request`, in the shape of the repository's issue form
+  (`.github/ISSUE_TEMPLATE/feature-request.yml`, template
+  `${CLAUDE_PLUGIN_ROOT}/templates/issue-form.yml`). It may be rough — it is the
+  input, not the spec.
 - **FR** (feature request) — the unit of work: a spec with acceptance criteria,
-  one branch, one worktree, one PR.
-- Issues and FRs are **m:n**. One issue may need several FRs; one FR may serve
-  several issues.
+  one branch, one worktree, one PR. An FR is a GitHub issue with the label `fr`,
+  its body in the shape of `${CLAUDE_PLUGIN_ROOT}/templates/fr.md`. Its id is the
+  issue number with `fr_prefix`: issue `#47` is `FR-47`.
+- Requests and FRs are m:n, expressed with what GitHub has:
+  - **one request, one change** → the request itself becomes the FR: label
+    `fr`, body rewritten into the spec, the original text kept at its end;
+  - **one request, several changes** → every FR is a **sub-issue** of the
+    request;
+  - **several requests, one change** → the FR is a sub-issue of one of them and
+    lists all of them under *Requests* in its Planning; GitHub records the
+    mention on each.
 
-## Project profile
+  `fr.sh issue-frs <request>` finds the FRs of a request in all three cases.
+- Requests and FR issues live in `issue_repo` (default: this repository).
+  Whoever reads the requests reads the specs: technical notes are fine there;
+  secrets, internal hostnames, customer data and the details of a security
+  weakness are not.
 
-`.claude/workflow.md` in the repository: flat `key: value` frontmatter (read by
-`fr.sh` and by you) plus prose sections with the project's facts — conventions,
-checks, test environment, extra rules. Template:
-`${CLAUDE_PLUGIN_ROOT}/templates/workflow.md`. Never invent a value the profile
-does not give — ask.
+## Life of an FR
+
+| Step                     | The spec is                                           | Status                                                    |
+| ------------------------ | ----------------------------------------------------- | --------------------------------------------------------- |
+| defined — `:new`         | the FR issue                                          | `open` — derived: open issue, label `fr`, no FR doc yet   |
+| started — `:start`       | the FR doc on the FR's branch, written from the issue | `in-progress`                                             |
+| shipped — `:ship`        | the FR doc, with the acceptance check                 | `in-review`                                               |
+| merged — by the user     | the FR doc on the base branch                         | `merged` — derived: an `in-review` doc on the base branch |
+| dropped — `:done … drop` | the FR doc, or only the issue if never started        | `dropped`                                                 |
+
+- **Until the start, the issue is the spec.** Refine it with `:new #47` or by
+  hand on GitHub; everything `:start` needs must be in it.
+- **From the start on, the FR doc is the source.** The issue's body is not
+  updated any more — decisions and deviations go into the FR doc, in the same
+  commits as the code; `:ship` reports the result on the issue.
+
+## FR issue
+
+- Body sections from `${CLAUDE_PLUGIN_ROOT}/templates/fr.md`: *Problem /
+  motivation*, *Desired behaviour*, *Failure behaviour*, *Scope*, *Acceptance
+  criteria*, *Technical notes*, *Open questions*, *Planning* — and, when a
+  request was rewritten, its original text at the end in
+  `<details><summary>Original request</summary>`.
+- `fr.sh` reads *Planning*:
+
+  ```markdown
+  ## Planning
+
+  - Areas: src/checkout, src/api/orders
+  - Size: M
+  - Model: opus
+  - Effort: high
+  - Based on: 3f2a9c1d2e4b
+  - Requests: #12, #15
+  ```
+
+  - **Areas:** the directories or files the FR is expected to change, from
+    reading the code. They decide what may run in parallel (see below).
+  - **Model**, **Effort:** for the implementation session, decided by `:new` —
+    explicit values in the request, else its size via `size_models`, else
+    `impl_model` / `impl_effort`.
+  - **Based on:** the commit of `origin/<base_branch>` whose code the definition
+    read. `:start` checks what changed in the areas since.
+  - **Requests:** the request issues this FR serves; empty when the FR is the
+    request itself.
+- Headings and Planning keys stay English — `fr.sh` reads them. The text may be
+  in any language.
+- **Ready to start:** open, label `fr`, at least one acceptance criterion, no
+  items under *Open questions*. `fr.sh spec` refuses anything else.
 
 ## FR document
 
-- Path `<fr_dir>/<ID>-<slug>.md`, e.g.
-  `req/feature-requests/FR-012-checkout-coupons.md`. Template:
-  `${CLAUDE_PLUGIN_ROOT}/templates/fr.md`.
-- The frontmatter is the **single source of truth**. Keep it flat, one line per
-  key, the list on one line:
+- `<fr_dir>/<ID>-<slug>.md` on the FR's branch, e.g.
+  `req/feature-requests/FR-47-coupons-in-checkout.md`. `fr.sh spec` writes it at
+  the start: the issue's sections verbatim — without *Planning*, which becomes
+  the frontmatter, and without the original request, which may hold customer
+  data (never in a commit) — plus `## Acceptance check` for `:ship`.
+- Frontmatter, flat, one line per key, lists on one line:
 
   ```yaml
   ---
-  id: FR-012
+  id: FR-47
+  issue: acme/shop#47
   title: Coupons in checkout
-  status: open
-  issues: [acme/shop#12, acme/shop#15]
+  status: in-progress
+  requests: [acme/shop#12, acme/shop#15]
   areas: [src/checkout, src/api/orders]
   model: opus
   effort: high
+  based_on: 3f2a9c1d2e4b
   pr:
-  created: 2026-10-25
+  started: 2026-10-29
   ---
   ```
 
-- `issues`: canonical refs `owner/repo#N`. Empty list is fine.
-- `areas`: the directories or files the FR is expected to change, from reading the
-  code at planning time. They decide what may run in parallel (see below).
-- `model`, `effort`: for the implementation session, decided by `:new` — from
-  the issue's explicit model/effort, else its size via `size_models`, else the
-  profile's `impl_model` / `impl_effort`. Empty → `impl_model` / `impl_effort`.
-- `status`: `open` → `in-progress` (`:start`) → `in-review` (`:ship`, after the
-  acceptance check passed), or `dropped` (`:done <ID> drop`). **`merged` is never written**: `fr.sh`
-  derives it when an `in-review` FR is on the base branch. The base branch is
-  usually protected, so nothing gets committed there after a merge.
+- `status`: `in-progress` (`:start`) → `in-review` (`:ship`, after the
+  acceptance check passed), or `dropped` (`:done <ID> drop`). **`merged` is never
+  written**: `fr.sh` derives it when an `in-review` FR is on the base branch. The
+  base branch is usually protected, so nothing gets committed there after a
+  merge.
 
 ## Branches and worktrees
 
-- One branch per FR, created by `:new` off `origin/<base_branch>` in a temporary
-  worktree — never on the branch the user is on, never on the base branch — and
-  pushed with the FR doc as its first commit. Name from `branch_pattern`, default
-  `{type}/{id-lower}-{slug}` → `feat/fr-012-checkout-coupons`. The branch name
-  **must contain the FR number** — that is how `fr.sh` finds FR docs on branches.
+- One branch per FR, created by `:start` off `origin/<base_branch>` — never on the
+  branch the user is on, never on the base branch — with the FR doc as its first
+  commit, pushed. Name from `branch_pattern`, default `{type}/{id-lower}-{slug}`
+  → `feat/fr-47-coupons-in-checkout`. The branch name **must contain the FR id**
+  — that is how `fr.sh` finds FR docs on branches.
 - One worktree per FR at `.claude/worktrees/<id-lower>-<slug>` (gitignored),
   created by `:start`.
 - The FR doc travels with the code and reaches the base branch with the merge.
@@ -77,7 +129,8 @@ does not give — ask.
   changed; one path inside the other counts as overlap, and so do two different
   files under one of the profile's `shared_paths` (migrations, lockfiles, i18n).
   An FR with neither areas nor changes overlaps everything — parallel only when it
-  is evident. The result groups FRs into waves; wave 1 can start now.
+  is evident. FRs not started yet count with the *Areas* of their issue. The
+  result groups FRs into waves; wave 1 can start now.
 - `:start` with several FRs starts one background session per FR of wave 1
   (`claude -w <name> --bg …`). Claude Code's own tools show them: `claude agents`,
   `claude logs`, `claude attach`.
@@ -94,24 +147,19 @@ does not give — ask.
   sessions on one machine, not other developers. Against those, the deployed
   commit is checked before and after the acceptance check.
 
-## Issue backlinks
-
-- Every linked GitHub issue carries one comment, maintained by `fr.sh sync`,
-  listing all FRs that reference it with status and PR. It is derived: never edit
-  or write it yourself — re-run sync.
-- After an FR's frontmatter changed **and was pushed** (otherwise its link does
-  not resolve), run `fr.sh sync-fr <ID>`. It syncs every issue the FR references
-  now *or referenced earlier*, so an issue taken out of `issues:` loses its entry
-  too. An FR without issues is a no-op.
-- Profile `backlinks: off` → skip sync.
-
 ## PRs and closing issues
 
-- The PR body links issues with `Refs owner/repo#N` — **never**
-  `Closes`/`Fixes`/`Resolves`: with m:n the first merge would close an issue that
-  other FRs still serve.
-- Issues are closed only by `:done`, only when every FR referencing them is
-  `merged` or `dropped`, and only after the user confirmed.
+- The PR body says `Closes <issue>` for the FR's own issue — one FR, one issue,
+  one PR, so the merge closes it — and `Refs <request>` for every request in
+  `requests`. **Never** `Closes`/`Fixes`/`Resolves` for a request: other FRs may
+  still serve it.
+- GitHub honours closing keywords only for PRs into the repository's default
+  branch. Otherwise, or when the merge did not close it, `:done` closes the FR
+  issue.
+- Requests are closed only by `:done`, only when every FR serving them is closed,
+  and only after the user confirmed.
+- A GitHub project (`project` in the profile) gets every FR issue `:new` writes.
+  Moving cards is left to the project's own workflows (*Item closed* → Done, …).
 
 ## Script
 
@@ -120,19 +168,18 @@ does not give — ask.
 | Command                                     | Does                                                                                                                                                                                                                     |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `check`                                     | prerequisites and profile                                                                                                                                                                                                |
-| `list`                                      | all FRs as TSV: `id status location ref path pr issues title areas model effort`                                                                                                                                         |
-| `next-id`                                   | next free id — counts base, FR branches, local files and branch names                                                                                                                                                    |
-| `issue-frs <ref>`                           | FRs that reference an issue                                                                                                                                                                                              |
-| `sync <ref>... [--dry-run]`                 | create or update the backlink comment of these issues                                                                                                                                                                    |
-| `sync-fr <ID>...\|--all [--dry-run]`        | the same for every issue of these FRs, past links included — what the skills use                                                                                                                                         |
+| `list`                                      | all FRs as TSV: `id status location ref path pr issue requests title areas model effort`                                                                                                                                 |
+| `spec <issue> [<file>]`                     | the FR doc of an FR issue — to stdout to check it, into a new `<file>` at the start. Exit 4 = not ready, with the reasons                                                                                                |
+| `issue-frs <issue>`                         | the FRs serving a request: `ref state reason via` — `reason` `completed`, `not_planned` or `duplicate` once closed; `via` `self`, `sub` or `requests`                                                                    |
 | `overlap [<ID>...]`                         | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now |
 | `lock acquire\|release\|break\|status <ID>` | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs                                                                                  |
 
-`location` is `base`, `branch` (then `ref` is the branch) or `local` (uncommitted
-in this checkout). `list`, `next-id`, `issue-frs`, `sync`, `sync-fr` and `overlap`
-fetch origin first; pass `--no-fetch` after the first call within one skill run.
-Issue refs are compared case-insensitively. Two FR branches with the same id make
-`fr.sh` print a warning — renumber one of them.
+`location` is `issue` (not started; `ref` is the issue), `base`, `branch` (then
+`ref` is the branch) or `local` (uncommitted in this checkout). `list` and
+`overlap` fetch origin first; pass `--no-fetch` after the first call within one
+skill run. Issue arguments: `#47`, `47`, `FR-47`, `owner/repo#47` or the URL;
+refs are compared case-insensitively. Two FR branches with the same id make
+`fr.sh` print a warning — one of them was started twice.
 
 ## Hard rules — every skill, every project
 
@@ -145,7 +192,7 @@ The profile and the project's `CLAUDE.md` may add rules; they never relax these.
   asks, for that one action.
 - **No code leaves the machine unreviewed.** Implementation sessions commit but
   never push; the first push of code is `:ship`, after its code and security
-  review. `:new` and `:start` push only FR docs.
+  review. `:new` writes only issues; `:start` pushes only FR docs.
 - **Secrets never get pushed.** A credential found in a change always stops,
   cannot be accepted, and is removed from the unpushed commits before any push.
 - **Never write a CI skip marker** — `[skip ci]`, `[ci skip]`, `[no ci]`,
@@ -157,8 +204,10 @@ The profile and the project's `CLAUDE.md` may add rules; they never relax these.
   `clean` or `stash drop` on the user's changes. Unclear changes → ask.
 - Never ask for, store or type credentials. A login wall → the user logs in
   themselves, in the browser window.
-- No personal or customer data in commits, PRs, issue comments or screenshots.
-- Issue comments are read by the customer: post only the backlink (`fr.sh sync`)
-  and what `notify_issues` allows.
+- No personal or customer data in commits, PRs, issues, issue comments or
+  screenshots.
+- Issues are read by the customer: write into them only what the skills name —
+  the FR spec, the short notes of `:new`, the result of `:ship` as far as
+  `notify_issues` allows, the closing comments of `:done`.
 - A gate that does not hold **stops** the skill: show the evidence, the user
   decides. No improvised fix loop.

@@ -1,12 +1,12 @@
 ---
 name: new
-description: Plan feature requests from GitHub issues and/or a discussion — one or more FR docs, m:n linked to issues, each on its own pushed branch. Session 1 of the workflow.
-argument-hint: "[#12 owner/repo#15 label:… milestone:… project:owner/N search:… or a description]"
+description: Define feature requests — from an idea or from GitHub issues, worked out against the code into FR issues that are complete specs. Writes only to GitHub.
+argument-hint: "[an idea | #12 owner/repo#15 FR-47 label:… milestone:… project:owner/N search:… | a file]"
 disable-model-invocation: true
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh *)
 ---
 
-# fr-workflow: new — plan FRs
+# fr-workflow: new — define FRs
 
 Read `${CLAUDE_PLUGIN_ROOT}/reference/model.md` and `.claude/workflow.md`.
 `${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh check` must pass, else point to
@@ -14,102 +14,134 @@ Read `${CLAUDE_PLUGIN_ROOT}/reference/model.md` and `.claude/workflow.md`.
 
 Input: $ARGUMENTS
 
+The result is one or more FR issues on GitHub, each a complete spec:
+`/fr-workflow:start` only pulls it, checks it and starts. This session is for
+thinking, not for code, and it writes nothing but issues — no branch, no file in
+the repository, no push.
+
 ## 1. Collect
 
-Any mix of:
+Any mix of — nothing given → ask for the idea or the issues:
 
-- Issue refs `#12`, `owner/repo#12`, issue URLs →
-  `gh issue view <n> -R <repo> --json number,title,body,labels,comments,url`.
-  Default repo: `issue_repo` from the profile, else this repository.
+- **An idea** in the conversation, without any issue → its FRs become new issues.
+- Issue refs `#12`, `owner/repo#12`, `FR-47`, issue URLs →
+  `gh issue view <n> -R <repo> --json number,title,body,labels,author,parent,subIssues,url`.
+  `<repo>` = `issue_repo` from the profile, else this repository.
 - `label:<name>` / `milestone:<name>` → `gh issue list -R <repo> --state open --limit 200 --label … / --milestone …`.
 - `project:<owner>/<number>` → `gh project item-list <number> --owner <owner> --limit 200 --format json`,
   issues only; apply a status or view filter if the user names one.
 - `search:<query>` → `gh issue list -R <repo> --limit 200 --search "<query>"`.
 - A list that reaches the limit is incomplete: say so and ask to narrow the
   selection — never plan from a silently cut list.
-- A local file — notes, a requirements document, an FR draft, a legacy FR without
-  frontmatter → read it as the source. The new FR gets a new id; name the source
-  file in its *Technical notes*. Do not modify or move the source file.
-- A description in the conversation, without any issue.
+- A local file — notes, a requirements document, a legacy FR → a source like an
+  idea. Do not modify or move it.
 
-For every issue also run `fr.sh issue-frs <ref>` — it may be served by FRs already.
+Per issue, what it is:
 
-**Issues from the form** (filed on GitHub, or by `/fr-workflow:idea`) have one
-`### <label>` section per field of `.github/ISSUE_TEMPLATE/*.yml` (the form
-labelled `fr-request`; else `${CLAUDE_PLUGIN_ROOT}/templates/issue-form.yml`).
-Map them: *Problem or need* → Problem / motivation; *Who is affected* and *Desired
-behaviour* → Desired behaviour; *How do we know it is done* → the acceptance
-criteria, rewritten so each one is checkable; *Size*, *Model*, *Effort* → model and
-effort (step 2). `_No response_` means empty. An issue without this structure is
-fine too — then the discussion has to fill those gaps.
+- **A request** (label `fr-request`, or none) → `fr.sh issue-frs <ref>`: FRs may
+  serve it already. Requests from the form have one `### <label>` section per
+  field of `.github/ISSUE_TEMPLATE/*.yml` (the form labelled `fr-request`; else
+  `${CLAUDE_PLUGIN_ROOT}/templates/issue-form.yml`): *Problem or need* → Problem /
+  motivation; *Who is affected* and *Desired behaviour* → Desired behaviour; *How
+  do we know it is done* → acceptance criteria, rewritten so each one is
+  checkable; *Size*, *Model*, *Effort* → Planning (step 2). `_No response_` means
+  empty. A request without this structure is fine — the discussion fills the
+  gaps.
+- **An FR** (label `fr`) → refine it. Already started (`fr.sh list` shows it with
+  a location other than `issue`) → its FR doc is the source now: say so and leave
+  the issue alone.
 
-## 2. Discuss — this session is for thinking, not for code
+## 2. Work it out — with the code
 
+- `git fetch origin`, then read the code as it is on `origin/<base_branch>` — the
+  checkout may be another branch or behind; `git show origin/<base_branch>:<path>`
+  for files that differ. Read only.
 - Summarize what was asked, per issue, in a few lines. Name contradictions, gaps
   and risks.
-- Read code where it helps to judge scope — read only.
-- Ask the open questions; iterate until the scope is clear.
-- Propose the cut. This table is where m:n gets decided:
+- Ask the open questions, a few at a time, and iterate until the scope is clear.
+  Only what the user wants left open goes under *Open questions* — such an FR
+  cannot start yet.
+- Settle the **failure behaviour**: what happens when something the change
+  depends on fails — a service, a file, input, a permission. What the user sees,
+  whether it retries, what is logged. "Nothing can fail here" is an answer too,
+  once checked. Where it matters to the user, make it an acceptance criterion —
+  `:ship` reviews the error handling against it.
+- New data types, or existing ones reshaped: name their invariants — what must
+  always hold, which states are invalid. They go into *Technical notes*.
+- *Technical notes* name the places in the code that change and how the change
+  fits in, concrete enough that the implementation session need not rediscover
+  them — as detailed as reading the code allows.
+- Propose the cut. This table decides how requests and FRs relate:
 
-  | FR | Title | Issues | Type | Areas | Model / effort |
-  |---|---|---|---|---|---|
-  | FR-012 | … | #12, #15 | feat | src/checkout | opus / high |
-  | FR-013 | … | #12 | fix | src/invoice/pdf | sonnet / medium |
+  | FR  | Title | Issue                 | Requests | Type | Areas           | Model / effort  |
+  | --- | ----- | --------------------- | -------- | ---- | --------------- | --------------- |
+  | #12 | …     | #12 rewritten         | —        | feat | src/checkout    | opus / high     |
+  | new | …     | new, sub-issue of #15 | #15, #16 | fix  | src/invoice/pdf | sonnet / medium |
+  | new | …     | new                   | —        | feat | src/search      | sonnet / low    |
 
-  One FR = one PR that can be reviewed and accepted on its own. Split an issue
-  that mixes independent changes; join issues that are the same change.
+  One FR = one PR that can be reviewed and accepted on its own. Split a request
+  that mixes independent changes; join requests that are the same change.
+  - **Issue:** a request with exactly one FR becomes that FR — its body is
+    rewritten. Several FRs from one request → new sub-issues of it. One FR for
+    several requests → a sub-issue of the first, all of them under *Requests*. An
+    idea → a new issue.
   - **Areas:** the directories or files it will change, from reading the code —
     as narrow as you can honestly say. They decide what may run in parallel.
   - **Model / effort**, decided for each of the two separately, first match wins:
-    1. explicit *Model* / *Effort* in the FR's issue(s) (not "From size");
-    2. the issue's *Size* through the profile's `size_models`
+    1. explicit *Model* / *Effort* in the request (not "From size");
+    2. the request's *Size* through the profile's `size_models`
        (e.g. `S=sonnet/low, M=sonnet/medium, L=opus/high, XL=opus/xhigh`);
     3. the profile's `impl_model` / `impl_effort`.
 
-    An FR serving several issues takes the largest size; explicit values that
-    disagree → ask.
+    An FR serving several requests takes the largest size; explicit values that
+    disagree → ask. **Explicit model / effort in a request are binding** — whoever
+    filed it decided them; never change them. A value derived from the *size* is
+    an estimate of the whole request: propose a different one only when the FR
+    clearly warrants it (one small FR cut from an `L` request, or a size that
+    plainly does not fit the work), mark the deviation in the table with its
+    reason, and let the user's confirmation decide.
+- Wait for the user to confirm the table. Say what confirming does on GitHub:
+  which issue bodies get rewritten, which issues get created, labels, project,
+  and the notes to authors (step 3.5).
 
-    **Explicit model / effort in an issue are binding** — whoever filed it decided
-    them; never change them. A value derived from the *size* is an estimate of the
-    whole request: propose a different one only when the FR clearly warrants it
-    (one small FR cut from an `L` issue, or a size that plainly does not fit the
-    work), mark the deviation in the table with its reason, and let the user's
-    confirmation decide.
-- Wait for the user to confirm the table. Say that confirming creates and pushes
-  one new branch per FR — off `origin/<base_branch>`, never on their current
-  branch or the base branch — and, with `backlinks: on`, comments on the listed
-  issues.
+## 3. Write the FR issues — after the confirmation
 
-## 3. Write each FR
+*Based on* = `git rev-parse --short=12 origin/<base_branch>`, the commit whose
+code you read.
 
-One after another, so ids cannot collide:
+1. **Body** from `${CLAUDE_PLUGIN_ROOT}/templates/fr.md`, every section filled;
+   *Open questions* says `None.` unless the user left one open on purpose. Keep
+   the headings and the Planning keys in English — `fr.sh` reads them; write the
+   text in the language of the issues. Check it against the hard rules before it
+   goes out: no credentials, no personal or customer data — requests often hold
+   pasted logs: describe instead of copying. Write it to a temporary file outside
+   the repository.
+2. **Labels** `fr` and `fr-request` must exist in `<repo>`
+   (`gh label list -R <repo> --search fr --json name`). Missing → say so, and
+   create one only if the user agrees:
+   `gh label create fr -R <repo> --description "Feature request, specified"`.
+3. **Per FR**, by its *Issue* column:
+   - *rewritten* → append the request's body unchanged, as
+     `<details><summary>Original request</summary>`, a blank line, the original,
+     a blank line, `</details>`. An FR being refined keeps its block as it is.
+     `gh issue edit <n> -R <repo> --body-file <file> --add-label fr`, plus
+     `--remove-label fr-request` if it has that label, plus `--title` only if the
+     user agreed to a new title.
+   - *new* → `gh issue create -R <repo> --title "<title>" --body-file <file> --label fr`,
+     plus `--parent <request number>` for a sub-issue.
+4. **Project** — only with `project` in the profile: `--project "<project>"` on
+   `create`, `gh issue edit <n> -R <repo> --add-project "<project>"` for a
+   rewritten issue. Missing scope → tell the user to run
+   `gh auth refresh -s project`, and go on without.
+5. **Notes to authors**, only on issues the current user
+   (`gh api user -q .login`) did not open:
+   - rewritten → `gh issue comment <n> -R <repo> --body "Worked out into a feature request — see the description. Your original text is kept at its end."`;
+   - split or joined → on the request: "Planned as #48, #49." with the FR issues
+     that serve it.
 
-1. `fr.sh next-id` (`--no-fetch` from the second call on).
-2. Branch name from `branch_pattern`; slug = 3–5 words of the title, lowercase
-   ASCII joined with `-` (ä→ae, ö→oe, ü→ue, ß→ss, accents dropped). The file name
-   uses the same slug.
-3. Create it without touching the user's checkout:
-   `git worktree add -b <branch> .claude/worktrees/_new-<id-lower> origin/<base_branch>`
-4. There, write `<fr_dir>/<ID>-<slug>.md` from `${CLAUDE_PLUGIN_ROOT}/templates/fr.md`:
-   frontmatter with `status: open`, canonical `issues`, `areas`, `model`,
-   `effort`, `created` = today; the sections from the discussion. Acceptance
-   criteria must be checkable on the test environment by someone who did not
-   write the code. Never copy credentials, tokens or personal data from issues
-   into the FR doc — issue bodies often hold pasted logs; describe instead.
-5. Commit with the project's convention (default `docs(fr): add <ID> <title>`).
-   After the commit, before pushing: check the doc for credentials or personal
-   data, and run the profile's secret scan on the commit if there is one — the
-   documented scans work on a commit range, so they see nothing before the commit.
-   Right before pushing, `fr.sh list` (with fetch): if a teammate pushed the same
-   id meanwhile, renumber this FR (`fr.sh next-id`; rename file, branch, id) first.
-   Then `git push -u origin <branch>`.
-6. `git worktree remove .claude/worktrees/_new-<id-lower>` — it is clean after the
-   commit; never `--force`.
+## 4. Report
 
-## 4. Link and report
-
-- `fr.sh sync-fr <ids of the new FRs> --no-fetch`, unless `backlinks: off`.
-- `fr.sh overlap <ids of the new FRs> --no-fetch`.
-- Report the final table with branch names, and which FRs can run in parallel
-  (wave 1) and which must wait, with the reason. Next step:
-  `/fr-workflow:start <ids of wave 1>` — one FR, or several at once.
+- `fr.sh overlap <FR ids> --no-fetch` for the FRs just written.
+- The final table with the issue links; which FRs can start in parallel (wave 1)
+  and which must wait, with the reason; which cannot start yet because of open
+  questions. Next step: `/fr-workflow:start #47 #48` — one FR, or several at once.

@@ -6,23 +6,22 @@ developer has installed.
 
 ```mermaid
 flowchart LR
-  I["GitHub issues"] -->|"new"| O["FR docs<br/>m:n to issues"]
-  O -->|"start"| P["one worktree<br/>per FR"]
-  P -->|"ship"| R["review · PR · CI ·<br/>test deploy · acceptance"]
-  R -->|"you merge"| M["merged"]
-  M -->|"done"| C["served issues closed"]
+  A["your idea"] -->|"new"| F["FR issue<br/>full spec · project"]
+  R["request on GitHub"] -->|"new"| F
+  F -->|"start"| P["FR doc · branch ·<br/>worktree · session"]
+  P -->|"ship"| S["review · PR · CI ·<br/>test deploy · acceptance"]
+  S -->|"you merge"| M["merged"]
+  M -->|"done"| C["requests closed<br/>when fully served"]
 ```
 
-| Command               | Does                                                                                                                                          |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/fr-workflow:init`   | once per repository: project profile, FR folder, issue form, team settings                                                                    |
-| `/fr-workflow:idea`   | define: talk an idea through along the issue form, create the issue, go on to planning                                                        |
-| `/fr-workflow:new`    | plan: issues and/or a discussion → one or more FR documents, each on a pushed branch                                                          |
-| `/fr-workflow:start`  | build: a worktree per FR and a fresh session with the FR's model and effort — several non-overlapping FRs in parallel, as background sessions |
-| `/fr-workflow:ship`   | finish: code and security review → PR → CI → test deployment → acceptance check → result into the FR document                                 |
-| `/fr-workflow:done`   | after the merge — or to drop an FR: close fully served issues (asks first), clean up                                                          |
-| `/fr-workflow:status` | overview of all FRs with their sessions, and which can run in parallel                                                                        |
-| `/fr-workflow:sync`   | refresh the generated issue comments, e.g. after editing an FR by hand                                                                        |
+| Command               | Does                                                                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/fr-workflow:init`   | once per repository: project profile, FR folder, issue form, labels, team settings                                                         |
+| `/fr-workflow:new`    | define: an idea or GitHub issues, worked out with the code into FR issues that hold the full spec — local first or GitHub first            |
+| `/fr-workflow:start`  | build: pulls the FR issue, checks it against the current code, then branch, FR doc, worktree and a fresh session — several FRs in parallel |
+| `/fr-workflow:ship`   | finish: code and security review → PR → CI → test deployment → acceptance check → result into the FR document                              |
+| `/fr-workflow:done`   | after the merge — or to drop an FR: close fully served requests (asks first), clean up                                                     |
+| `/fr-workflow:status` | overview of all FRs with their sessions, the requests still to define, and which FRs can run in parallel                                   |
 
 ## Documentation
 
@@ -36,11 +35,14 @@ flowchart LR
 
 ## Design decisions
 
-- **The FR frontmatter is the single source of truth** for the m:n link. The
-  comment on each issue is derived by `scripts/fr.sh` and can be regenerated at
-  any time.
-- **`Refs`, never `Closes`.** With m:n the first merge would close an issue other
-  FRs still serve. `done` closes an issue when all its FRs are merged.
+- **The issue is the spec until the start.** Defining needs the code, so it
+  happens locally — but the result lives on GitHub, where it can be read,
+  prioritized and planned. `start` only pulls it, checks it and writes it into
+  the FR document, the source from then on.
+- **What GitHub has, not own bookkeeping.** An FR's id is its issue number;
+  requests and FRs are linked with sub-issues and mentions; `Closes` closes the
+  FR issue, `Refs` links the requests. `done` closes a request when all its FRs
+  are closed — never a request on the first merge.
 - **No shared index file.** A table edited in every PR conflicts and drifts;
   `status` derives the overview.
 - **`merged` is derived, not written** — nothing needs to be committed to a
@@ -54,8 +56,9 @@ flowchart LR
   Microsoft, and an outdated pin would be one more thing to keep up. The trade-off
   is that a new Playwright release reaches every project at once.
 - **No CI skip markers, anywhere.** A squash merge would carry them onto the base
-  branch and skip its release. Builds from planning pushes are avoided with
-  `paths-ignore` on push triggers, which `init` proposes.
+  branch and skip its release. A build from the first push of an FR branch, which
+  holds only the FR document, is avoided with `paths-ignore` on push triggers,
+  which `init` proposes.
 - **Hard limits:** never merges, never triggers deployments, never touches
   production, never handles credentials.
 
@@ -69,9 +72,10 @@ plugins/fr-workflow/
   .claude-plugin/plugin.json        name, version
   .mcp.json                         bundled Playwright MCP server
   skills/<command>/SKILL.md         one folder per command
+  agents/                           reviewer agents for ship, adapted from pr-review-toolkit (Apache-2.0)
   reference/model.md                model and rules, read by every command
-  scripts/fr.sh                     deterministic part: FR list, ids, issue comments
-  templates/                        FR document, profile, FR folder README
+  scripts/fr.sh                     deterministic part: FR list, FR doc from the issue, FRs of a request, overlap, lock
+  templates/                        FR issue, profile, issue form, FR folder README
 docs/                               user documentation
 tests/fr-sh.sh                      regression suite for scripts/fr.sh
 CLAUDE.md                           decisions, conventions and pitfalls for maintainers

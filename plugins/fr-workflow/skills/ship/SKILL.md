@@ -43,20 +43,24 @@ step 6 — and **before stopping at any gate**, so other FRs are not blocked.
 
 1. Commit everything that belongs to the FR **locally** (project convention), so
    new files are part of the reviewed range. Do not push.
-2. Run both built-in reviews on the FR's range:
+2. Run the reviews on the FR's range:
    - `/code-review high origin/<base_branch>...HEAD` — a revision range is a
      documented target; without one it would review only what is ahead of the
      branch's upstream, which can be nothing. It runs in the background as its
      own agent, so start it first;
+   - the profile's `review_agents` (default `[silent-failure-hunter]`): each as
+     the agent `fr-workflow:<name>`, given the range and the FR doc's path. They
+     run in the background too. A name the plugin has no agent for → ask, never
+     skip it silently;
    - meanwhile `/security-review`, telling it the range
      `origin/<base_branch>...HEAD`. If `base_branch` is not the repository's
      default branch it may compare against the default branch: check that its
      findings concern this FR's files.
 
-   Take both results before applying the gates. **Neither review ends this
-   skill:** when one returns its report, do not end your turn — wait for the
-   other (the background `/code-review` reports back by itself) and continue
-   with 3. in the same run, up to step 7.
+   Take all results before applying the gates. **No review ends this skill:**
+   when one returns its report, do not end your turn — wait for the others (the
+   background reviews report back by themselves) and continue with 3. in the
+   same run, up to step 7.
 3. **Secrets always stop** — hard-coded credentials, tokens, private keys —
    whatever the gates say, and they cannot be accepted. The unpushed commits that
    contain one are rewritten so it never reaches the remote. `<target>` is
@@ -80,11 +84,12 @@ step 6 — and **before stopping at any gate**, so other FRs are not blocked.
       remote, an earlier PR (GitHub keeps PR refs and unreachable commits) → the
       credential is compromised: tell the user to rotate it; changing history
       does not help.
-4. Other findings: code findings follow `review_gate`, security findings follow
-   `security_gate` (default `stop`, independent of `review_gate`):
+4. Other findings: code findings — from `/code-review` and the review agents —
+   follow `review_gate`, security findings follow `security_gate` (default
+   `stop`, independent of `review_gate`):
    - `stop` → list them; the user decides per finding: fix, accept, or abort;
    - `report` → collect them and go on.
-5. After **any** fix (a new local commit): run **both** reviews again on the range.
+5. After **any** fix (a new local commit): run **all** reviews again on the range.
    A fix for a code finding can open a security hole.
 6. *Review notes* for the PR: every accepted security finding with the user's
    reason, and under `report` every security finding. Describe the risk, not how
@@ -101,9 +106,10 @@ step 6 — and **before stopping at any gate**, so other FRs are not blocked.
 - Push the branch.
 - PR: the open PR from step 0, else `gh pr create --base <base_branch>`:
   - title per the profile (it often becomes the squash-merge title);
-  - body: link to the FR doc on the branch, a short summary, `Refs owner/repo#N`
-    per issue — **never** `Closes`/`Fixes` — the acceptance criteria as the test
-    plan, and *Review notes* (step 1.6) if there are any;
+  - body: link to the FR doc on the branch, a short summary, `Closes <issue>` for
+    the FR's own issue (`issue` in the frontmatter) and `Refs <request>` for each
+    of its `requests` — **never** `Closes`/`Fixes` for a request — the acceptance
+    criteria as the test plan, and *Review notes* (step 1.6) if there are any;
   - no CI skip marker in title, body or any commit (see the hard rules).
 - Reused PR whose *Review notes* changed → `gh pr edit <N> --body-file <file>`.
 - Set `pr: <N>` in the frontmatter; it is committed in step 6.
@@ -116,7 +122,7 @@ Other FRs may have been merged meanwhile. `gh pr view <N> --json mergeable,merge
 - `CONFLICTING`, or `BEHIND` where the branch must be up to date →
   `git fetch origin && git merge origin/<base_branch>` in the worktree. **Merge,
   never rebase**, never force-push.
-- Git merges cleanly → run both reviews on the merged range and the local checks
+- Git merges cleanly → run all reviews on the merged range and the local checks
   again, push, continue.
 - Real conflicts → resolve only what is unambiguous (e.g. both sides added
   different entries). Anything that needs a decision → `git merge --abort`, stop,
@@ -205,13 +211,14 @@ Only when no criterion failed, and the user accepted any unverified ones:
   `deploy_signal`), wait for that too; if none starts within 5 minutes after CI
   (e.g. `paths-ignore` skips FR-doc-only pushes), go on. Then
   `fr.sh lock release <ID>`.
-- `fr.sh sync-fr <ID> --no-fetch`.
 
 ## 7. Notify and report
 
 - `notify_issues`: `never` → nothing; `ask` → offer it; `always` → post. One new
-  comment per issue — it notifies watchers, the edited backlink does not:
-  "Ready for acceptance on <test env URL> — <ID> <title>, PR <repo>#<N>."
+  comment on the FR's issue and on each of its `requests` — their watchers learn
+  it there: "Ready for acceptance on <test env URL> — <ID> <title>, PR <repo>#<N>."
+  The FR's body stays as it was at the start; the result lives in the FR doc and
+  the PR.
 - Report in one block: PR link · CI · deployment · acceptance check per criterion
   · review findings accepted or reported · what is left: the merge (the user's),
   then `/fr-workflow:done <ID>`.

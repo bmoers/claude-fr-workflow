@@ -10,8 +10,9 @@ pitfalls that the code does not show.
 - **Minimal maintenance budget.** Prefer what someone else maintains: Claude Code
   built-ins (`/code-review`, `/security-review`, worktrees, `claude agents`,
   `--bg`) over GitHub features (issue forms) over own code. Own code only where
-  nothing equivalent exists — here `scripts/fr.sh` (the m:n logic) and the skill
-  texts.
+  nothing equivalent exists — here `scripts/fr.sh` (FR list, FR doc from the
+  issue, the FRs of a request, overlap, lock), the skill texts and the two review
+  agents.
 - **Projects only get better, never worse.** Client repositories pin a tag. A
   change is released as a new tag, tested in the sandbox, and only then does a
   client's pin go up. Never move a pushed tag.
@@ -21,27 +22,42 @@ pitfalls that the code does not show.
 
 ## Decisions — do not reopen without a new reason
 
-- The FR frontmatter is the single source of truth for the m:n link between
-  issues and FRs; issue backlink comments are derived (`fr.sh sync`, `sync-fr`).
-- PRs say `Refs`, never `Closes`; `done` closes an issue only when all its FRs
-  are merged, and only after confirmation.
+- **The issue is the spec until the start** (0.5). An FR is a GitHub issue with
+  the label `fr` holding the full spec, written by `new` — local first from an
+  idea, or GitHub first from a request. `start` turns it into the FR doc
+  (`fr.sh spec`); from then on the doc is the source and the issue body is not
+  synced back. Replaces FR docs from `new` on, `next-id` and the backlink
+  comments.
+- The FR id is the issue number. Requests and FRs are linked with what GitHub
+  has: sub-issues, and the *Requests* line of the FR's Planning, found back
+  through the request's timeline (`fr.sh issue-frs`) — no own bookkeeping.
+- PRs say `Closes` for the FR's own issue and `Refs` for its requests; `done`
+  closes a request only when all its FRs are closed, and only after
+  confirmation.
 - No shared index file; `merged` is derived (an `in-review` doc on the base
   branch), never written.
-- An FR doc lives on its own branch from `new` on, created off `origin/<base>` in
-  a temporary worktree — never on the user's branch or the base branch.
+- `new` writes only to GitHub. An FR's branch is created by `start` off
+  `origin/<base>` in its worktree, the FR doc as first commit — never on the
+  user's branch or the base branch.
 - Implementation sessions commit but never push; `ship` pushes after its code
   and security review. Secrets always stop and are removed from unpushed
   commits; a secret ever pushed must be rotated.
 - No CI skip markers anywhere — a squash merge copies them onto the base branch
   and skips its release. Builds from planning pushes are avoided with
   `paths-ignore` on push triggers, which `init` proposes.
-- One shape for issues: `templates/issue-form.yml`. The GitHub form and
-  `/fr-workflow:idea` produce the same structure.
-- Model and effort per field: explicit values in the issue are binding; else the
-  issue's size via `size_models`; else `impl_model` / `impl_effort`.
+- Two shapes of issue: requests follow `templates/issue-form.yml` (the GitHub
+  form, label `fr-request`), FR issues `templates/fr.md` (label `fr`). Headings
+  and Planning keys stay English — `fr.sh` parses them.
+- Model and effort per field: explicit values in the request are binding; else
+  its size via `size_models`; else `impl_model` / `impl_effort`.
+- `agents/` holds adapted copies of `silent-failure-hunter` and
+  `type-design-analyzer` from Anthropic's `pr-review-toolkit` (Apache-2.0,
+  `LICENSE` beside them): the originals assume Anthropic's own codebase (Sentry,
+  `logError`, error ids) and a plugin the client machine may not have. Upstream
+  changes are not followed automatically. Its other agents duplicate built-ins.
 - Playwright MCP stays on `@latest` — maintained by Microsoft; accepted trade-off.
-- Jira is reserved in the format (`jira:KEY-N`) but not implemented; when needed,
-  via Atlassian's official MCP server, not own code.
+- Jira is not implemented — FRs are GitHub issues. When needed, via Atlassian's
+  official MCP server, not own code.
 - The plugin never merges, never triggers deployments, never touches production.
 
 ## Code conventions
@@ -56,7 +72,12 @@ pitfalls that the code does not show.
 - Skills are English, `disable-model-invocation: true`, and allow `fr.sh` via
   `${CLAUDE_PLUGIN_ROOT}` in `allowed-tools`. They read `reference/model.md`
   first. A skill cannot invoke another one (`disable-model-invocation`), so it
-  reads the other's `SKILL.md` and follows it (`idea` → `new`).
+  reads the other's `SKILL.md` and follows it.
+- Agents get read-only `tools` and a short `description` — it is loaded in every
+  session. Their attribution comment stays and says what was changed.
+- Issue bodies are read only through `PLAN_AWK` (`planning()`), fetched with the
+  `J_ROW` / `J_REST` jq expressions: lines joined by `\037`, never `@tsv`, whose
+  escapes are ambiguous.
 - Every bug fixed in `fr.sh` gets a case in `tests/fr-sh.sh`.
 - Markdown tables are column-aligned, so they read in plain text too: every cell
   padded to its column's width, separator rows as `| --- |`. Re-align the whole
@@ -67,8 +88,8 @@ pitfalls that the code does not show.
 - `/bin/bash tests/fr-sh.sh` — throwaway repos, stub `gh`, nothing reaches GitHub.
 - `claude plugin validate .` and `claude plugin validate plugins/fr-workflow`.
 - **Sandbox:** private repo `bmoers/fr-workflow-sandbox`, pinned in its
-  `.claude/settings.json`, with profile, issue form and label `fr-request` set
-  up. The local clone must be a folder Claude Code trusts, otherwise background
+  `.claude/settings.json`, with profile, issue form and labels `fr-request` and
+  `fr` set up. The local clone must be a folder Claude Code trusts, otherwise background
   sessions refuse to start.
 - **Headless runs** (`claude -p`) do not load plugins from project settings: use
   `--plugin-dir plugins/fr-workflow` of this working copy for unreleased changes,
@@ -79,8 +100,8 @@ pitfalls that the code does not show.
   `/plugin marketplace update` alone keeps following the old `ref`.
 - The auto-mode classifier refuses to create GitHub repositories and to merge
   PRs: the maintainer does those, in the sandbox too.
-- After a test, reset the sandbox: delete FR branches (remote and local) and
-  backlink comments, close test issues as *not planned*; keep its setup.
+- After a test, reset the sandbox: delete FR branches (remote and local), close
+  test issues as *not planned*; keep its setup.
 
 ## Release
 
@@ -93,7 +114,9 @@ a new session there.
 
 - 0.1 m:n model, backlinks · 0.2 parallel FRs, model/effort per FR, sync and drop
   · 0.3 security review in `ship`, nothing pushed unreviewed · 0.4 issue form and
-  `/fr-workflow:idea`. Details: [CHANGELOG.md](CHANGELOG.md).
+  `/fr-workflow:idea` · 0.5 the issue is the spec until the start (local or
+  GitHub first, sub-issues, project; `idea` and `sync` gone), review agents in
+  `ship`, failure behaviour. Details: [CHANGELOG.md](CHANGELOG.md).
 - Before 0.3.0, three `/code-review` rounds found 37, 23 and 19 issues. Recurring
   bug classes: `set -e` exit codes, git path quoting, ref normalization, branch
   name rules, unpushed local commits, the order of secret removal. 0.3.1 came

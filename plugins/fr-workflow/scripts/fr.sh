@@ -1,39 +1,38 @@
 #!/usr/bin/env bash
 # fr.sh — deterministic helpers for the fr-workflow plugin.
 #
-# The FR documents' frontmatter is the single source of truth for the m:n link
-# between feature requests and issues. Everything this script prints or posts
-# is derived from it, so it can be re-run at any time.
+# Until an FR is started, its GitHub issue (label `fr`) is the spec; `start`
+# turns it into the FR document on the FR's branch, the source from then on.
+# Everything this script prints is derived from those two, so it can be re-run
+# at any time.
 #
-# Needs git and awk; `sync` and `check` also need an authenticated gh.
-# Written for bash 3.2 (macOS default) and Git Bash on Windows: no associative
-# arrays, no mapfile. Run from anywhere inside the repository.
+# Needs git, awk and an authenticated gh. Written for bash 3.2 (macOS default)
+# and Git Bash on Windows: no associative arrays, no mapfile. Run from anywhere
+# inside the repository.
 #
 # Usage:
 #   fr.sh check                    prerequisites and profile
-#   fr.sh list [--no-fetch]        all FRs (base branch, FR branches, local edits)
-#   fr.sh next-id [--no-fetch]     next free FR id
-#   fr.sh issue-frs <ref> [--no-fetch]   FRs that reference an issue
-#   fr.sh sync <ref>... [--no-fetch] [--dry-run]   upsert the backlink comment
-#   fr.sh sync-fr <ID>...|--all [--no-fetch] [--dry-run]
-#                                  sync every issue an FR references now or
-#                                  referenced earlier (from git history)
+#   fr.sh list [--no-fetch]        all FRs: open FR issues not started yet, FR
+#                                  docs on the base branch, FR branches, local
+#   fr.sh spec <issue> [<file>]    the FR doc of an FR issue, to stdout or into a
+#                                  new <file>; exit 4 if the issue is not ready
+#   fr.sh issue-frs <issue>        the FRs that serve a request issue
 #   fr.sh overlap [<ID>...] [--no-fetch]
 #                                  which candidates (default: all open FRs) may
 #                                  start alongside the in-progress ones: waves
 #   fr.sh lock acquire|release|break|status [<ID>]
 #                                  ship lock for a shared test environment
 #
-# Issue refs: owner/repo#12, #12 or 12 (default repo), a GitHub issue URL.
-# jira:KEY-123 is accepted in frontmatter but skipped by `sync` (not in v1).
+# Issue refs: owner/repo#12, #12, 12 or FR-12 (issue repo), a GitHub issue URL.
 
 set -euo pipefail
 
-MARKER='<!-- fr-workflow:backlink -->'
 PROFILE='.claude/workflow.md'
+ISSUE_LIMIT=1000
 
 die() { echo "fr.sh: $*" >&2; exit 1; }
 
+CALLER=$PWD
 TOP=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git repository"
 cd "$TOP"
 
@@ -64,7 +63,6 @@ cfg() {
 FR_DIR=$(cfg fr_dir req/feature-requests)
 PREFIX=$(cfg fr_prefix FR)
 BASE=$(cfg base_branch main)
-DIGITS=$(cfg id_digits 3)
 
 # owner/repo of origin. Reads the raw config value: `git remote get-url`
 # applies url.*.insteadOf rewrites and can return a non-GitHub URL.
@@ -90,12 +88,14 @@ DR=""
 dr_init() { [ -n "$DR" ] || DR=$(default_repo | tr '[:upper:]' '[:lower:]'); }
 
 # awk: the one canonical issue ref — owner/repo#N, owner/repo lowercased (GitHub
-# names are case-insensitive). Accepts #N, N, owner/repo#N, issue URLs; other
-# refs (jira:KEY-1) pass through unchanged. Needs -v dr=<default repo>.
+# names are case-insensitive). Accepts #N, N, <prefix>-N, owner/repo#N, issue
+# URLs; anything else passes through unchanged. Needs -v dr=<default repo> and
+# -v pre=<fr_prefix>.
 NORM_AWK='
   function canon(x,   i) {
     if (x ~ /^#[0-9]+$/) x = dr x
     else if (x ~ /^[0-9]+$/) x = dr "#" x
+    else if (toupper(x) ~ ("^" toupper(pre) "-[0-9]+$")) x = dr "#" substr(x, length(pre) + 2)
     else if (x ~ /^https:\/\/github\.com\/[^\/]+\/[^\/]+\/issues\/[0-9]+/) {
       sub(/^https:\/\/github\.com\//, "", x); sub(/\/issues\//, "#", x)
       match(x, /^[^\/]+\/[^#]+#[0-9]+/); x = substr(x, RSTART, RLENGTH)
@@ -106,15 +106,15 @@ NORM_AWK='
 
 norm() {
   dr_init
-  printf '%s\n' "$1" | awk -v dr="$DR" "$NORM_AWK"'{ print canon($0) }'
+  printf '%s\n' "$1" | awk -v dr="$DR" -v pre="$PREFIX" "$NORM_AWK"'{ print canon($0) }'
 }
 
-# Git ref holding an FR's current doc: git_ref_for <location> <ref>
-git_ref_for() {
-  case "$1" in
-    base) base_ref ;;
-    branch) pick_ref "$2" ;;
-    *) echo HEAD ;;
+# owner/repo#N of a GitHub issue argument, or die: issue_ref <arg>
+issue_ref() {
+  local r; r=$(norm "$1")
+  case "$r" in
+    */*#[0-9]*) echo "$r" ;;
+    *) die "not a GitHub issue: $1" ;;
   esac
 }
 
@@ -128,7 +128,7 @@ base_ref() {
 
 # Lowercase regex for FR branch names (without "origin/"), from branch_pattern.
 # With the default "{type}/{id-lower}-{slug}" the first segment must be a branch
-# type, so i18n/fr-2024-cleanup is not an FR branch. Used by collect and next-id.
+# type, so i18n/fr-2024-cleanup is not an FR branch. Used by fr_branches.
 fr_branch_re() {
   local p bp
   p=$(printf '%s' "$PREFIX" | tr '[:upper:]' '[:lower:]')
@@ -161,7 +161,7 @@ do_fetch() {
   fi
 }
 
-# Frontmatter on stdin -> "id status pr issues title areas model effort"
+# Frontmatter on stdin -> "id status pr issue requests title areas model effort"
 # (tab-separated). Prints nothing for files without frontmatter or an id.
 parse_fm() {
   awk '
@@ -177,17 +177,80 @@ parse_fm() {
     }
     END {
       if (!done || f["id"] == "") exit
-      iss = f["issues"]; gsub(/\[/, "", iss); gsub(/\]/, "", iss); gsub(/ /, "", iss)
+      rq = f["requests"]; gsub(/\[/, "", rq); gsub(/\]/, "", rq); gsub(/ /, "", rq)
       ar = f["areas"]; gsub(/\[/, "", ar); gsub(/\]/, "", ar); gsub(/ /, "", ar)
       t = f["title"]; gsub(/\t/, " ", t)
-      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", f["id"], f["status"], f["pr"], iss, t, ar, f["model"], f["effort"]
+      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", f["id"], f["status"], f["pr"], f["issue"], rq, t, ar, f["model"], f["effort"]
     }'
 }
 
-# emit <location> <ref-for-links> <path>   (frontmatter on stdin)
+# emit <location> <ref> <path>   (frontmatter on stdin)
 emit() {
   parse_fm | awk -v loc="$1" -v ref="$2" -v p="$3" 'BEGIN { FS = OFS = "\t" }
-    { print $1, $2, loc, ref, p, $3, $4, $5, $6, $7, $8 }'
+    { print $1, $2, loc, ref, p, $3, $4, $5, $6, $7, $8, $9 }'
+}
+
+# awk: planning(body, sep) reads the `## Planning` section of an FR issue body,
+# its lines joined by sep, into P["areas"], P["model"], P["effort"],
+# P["based on"], P["requests"], … (lowercase keys). csv() drops the blanks of a
+# comma list; reqs() also makes each entry canonical (needs NORM_AWK).
+PLAN_AWK='
+  function planning(b, sep,   L, n, i, on, fence, l, j, k, v) {
+    split("", P); n = split(b, L, sep)
+    for (i = 1; i <= n; i++) {
+      l = L[i]; sub(/\r$/, "", l)
+      if (l ~ /^ *(```|~~~)/) fence = !fence
+      if (!fence && l ~ /^#+ /) { on = (tolower(l) ~ /^## +planning *$/); continue }
+      if (l ~ /^<details/) on = 0
+      if (!on || l !~ /^[-*] +[^:]+:/) continue
+      sub(/^[-*] +/, "", l); j = index(l, ":")
+      k = tolower(substr(l, 1, j - 1)); v = substr(l, j + 1)
+      gsub(/[*_`]/, "", k); sub(/^\*+/, "", v); gsub(/`/, "", v)
+      sub(/^[ \t]+/, "", k); sub(/[ \t]+$/, "", k); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+      if (v == "-" || v == "—" || tolower(v) == "none") v = ""
+      P[k] = v
+    }
+  }
+  function csv(v) { gsub(/[ \t]/, "", v); return v }
+  function reqs(v,   a, n, i, o) {
+    n = split(csv(v), a, ","); o = ""
+    for (i = 1; i <= n; i++) if (a[i] != "") o = o (o == "" ? "" : ",") canon(a[i])
+    return o
+  }'
+
+# jq: one issue per line, fields tab-separated, the body's lines joined by \037
+# (unit separator) — unambiguous, unlike @tsv's escapes. J_ROW for
+# `gh issue list` (number title body), J_REST for REST issue objects
+# (url state reason labels title body).
+J_BODY='((.body // "") | gsub("\r"; "") | gsub("\t"; " ") | gsub("\n"; "\u001f"))'
+J_TITLE='(.title | gsub("[\t\n\r]"; " "))'
+J_ROW="[(.number | tostring), $J_TITLE, $J_BODY] | join(\"\t\")"
+J_REST="[.html_url, .state, (.state_reason // \"\"), ([.labels[].name] | join(\",\")), $J_TITLE, $J_BODY] | join(\"\t\")"
+
+tag() { awk -v t="$1" '{ print t "\t" $0 }'; }
+
+# Open FR issues (label fr) as rows with location "issue" — FRs not started
+# yet. A doc with the same id (base, branch, local) overrides the row in rows().
+issue_rows() {
+  local repo out
+  repo=$(default_repo)
+  if ! command -v gh >/dev/null ||
+     ! out=$(gh issue list -R "$repo" --label fr --state open --limit "$ISSUE_LIMIT" \
+       --json number,title,body --jq ".[] | $J_ROW" 2>/dev/null); then
+    echo "fr.sh: warning: could not read the FR issues of $repo — FRs not started yet are missing" >&2
+    return 0
+  fi
+  [ -n "$out" ] || return 0
+  if [ "$(printf '%s\n' "$out" | wc -l)" -ge "$ISSUE_LIMIT" ]; then
+    echo "fr.sh: warning: $ISSUE_LIMIT open FR issues or more — the list is cut" >&2
+  fi
+  dr_init
+  printf '%s\n' "$out" | awk -v dr="$DR" -v pre="$PREFIX" "$NORM_AWK$PLAN_AWK"'
+    BEGIN { FS = OFS = "\t" }
+    {
+      planning($3, "\037"); r = canon("#" $1)
+      print pre "-" $1, "open", "issue", r, "", "", r, reqs(P["requests"]), $2, csv(P["areas"]), P["model"], P["effort"]
+    }'
 }
 
 is_fr_file() {
@@ -222,11 +285,12 @@ fr_branches() {
       tolower($0) ~ re { print }' | sort -u
 }
 
-# Raw rows from all sources, later sources win per id:
-# 1. base branch  2. FR branches whose doc differs from base  3. local edits.
+# Raw rows from all sources, later sources win per id: 1. open FR issues
+# 2. base branch  3. FR branches whose doc differs from base  4. local edits.
 collect() {
   local bref br name p cur baserows row
   bref=$(base_ref)
+  issue_rows
 
   baserows=$(g ls-tree -r --name-only "$bref" -- "$FR_DIR" 2>/dev/null | is_fr_file |
     while IFS= read -r p; do
@@ -239,7 +303,9 @@ collect() {
     while IFS= read -r name; do
       br=$(pick_ref "$name")
       # --no-renames: a doc renamed on its branch shows up as added (A), not R.
-      g diff --name-only --no-renames --diff-filter=AM "$bref...$br" -- "$FR_DIR" 2>/dev/null | is_fr_file |
+      # A branch without merge base fails the diff — without `|| true` that
+      # would end the loop and hide every FR branch sorted after it.
+      { g diff --name-only --no-renames --diff-filter=AM "$bref...$br" -- "$FR_DIR" 2>/dev/null || true; } | is_fr_file |
         while IFS= read -r p; do
           # A squash-merged branch carries the same doc as base: base wins.
           if git cat-file -e "$bref:$p" 2>/dev/null && git diff --quiet "$bref" "$br" -- "$p"; then
@@ -283,14 +349,14 @@ rows() {
       for (i = 1; i <= n; i++) {
         split(row[order[i]], c, "\t")
         if (c[3] == "base" && c[2] == "in-review") c[2] = "merged"
-        print c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11]
+        print c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11], c[12]
       }
     }' | sort
 }
 
 want_fetch() { case " $* " in *" --no-fetch "*) ;; *) do_fetch ;; esac; }
 
-HEADER='id\tstatus\tlocation\tref\tpath\tpr\tissues\ttitle\tareas\tmodel\teffort\n'
+HEADER='id\tstatus\tlocation\tref\tpath\tpr\tissue\trequests\ttitle\tareas\tmodel\teffort\n'
 
 cmd_list() {
   want_fetch "$@"
@@ -298,176 +364,115 @@ cmd_list() {
   rows
 }
 
-# Next free id: the FR docs themselves (base, FR branches, uncommitted files)
-# plus FR branches that have no doc yet — `new` creates the branch first. Only
-# names of the branch_pattern shape count (`…/fr-012-slug`), so `i18n/fr-2024`
-# does not make ids jump.
-cmd_next_id() {
-  want_fetch "$@"
-  local p; p=$(printf '%s' "$PREFIX" | tr '[:upper:]' '[:lower:]')
-  { rows | cut -f1 | awk -v p="$p" '
-      { s = tolower($0); if (index(s, p "-") == 1) s = substr(s, length(p) + 2); else sub(/^[^0-9]*/, "", s); print s + 0 }'
-    fr_branches | awk -v p="$p" '
-      { s = tolower($0)
-        if (match(s, "(^|/)" p "-[0-9]+")) { m = substr(s, RSTART, RLENGTH); sub("^/?" p "-", "", m); print m + 0 } }'
-  } | awk -v pre="$PREFIX" -v d="$DIGITS" '
-      { if ($1 + 0 > max) max = $1 + 0 }
-      END { printf "%s-%0" d "d\n", pre, max + 1 }'
+# The FR doc of an FR issue, for `start`: frontmatter from the issue's title and
+# its `## Planning` section, the spec sections verbatim — without Planning and
+# without the original request kept in <details> (it may hold customer data,
+# which never goes into a commit). Not ready — closed, no label fr, no
+# acceptance criteria, open questions left — prints why and exits 4.
+cmd_spec() {
+  [ $# -ge 1 ] || die "usage: fr.sh spec <issue> [<file>]"
+  command -v gh >/dev/null || die "gh not found"
+  local ref out="${2:-}" meta body doc rc=0
+  ref=$(issue_ref "$1")
+  if [ -n "$out" ]; then
+    case "$out" in /*) ;; *) out="$CALLER/$out" ;; esac
+    [ ! -e "$out" ] || die "$out exists — not overwritten"
+  fi
+  meta=$(gh issue view "${ref##*#}" -R "${ref%%#*}" --json state,labels,title \
+    --jq "[.state, ([.labels[].name] | join(\",\")), $J_TITLE] | join(\"\t\")") || die "cannot read $ref"
+  body=$(gh issue view "${ref##*#}" -R "${ref%%#*}" --json body --jq '.body // ""') || die "cannot read $ref"
+  dr_init
+  doc=$(printf '%s\n' "$body" | awk -v meta="$meta" -v ref="$ref" -v dr="$DR" -v pre="$PREFIX" \
+      -v today="$(date +%Y-%m-%d)" "$NORM_AWK$PLAN_AWK"'
+    function opens(s) { return gsub(/<details/, "&", s) }
+    function closes(s) { return gsub(/<\/details>/, "&", s) }
+    function fail(m) { bad = bad "\n  - " m }
+    # the original request (<details><summary>Original request…) is skipped as a
+    # whole, nested <details> included; returns 1 for every line inside it
+    function original(l) {
+      if (d > 0) { d += opens(l) - closes(l); return 1 }
+      if (l ~ /^<details> *<summary> *Original request/) { d = opens(l) - closes(l); return 1 }
+      return 0
+    }
+    { sub(/\r$/, ""); L[++n] = $0; all = all (n > 1 ? "\n" : "") $0 }
+    END {
+      split(meta, M, "\t"); num = ref; sub(/^.*#/, "", num)
+      if (M[1] != "OPEN") fail("the issue is closed")
+      if (("," M[2] ",") !~ /,fr,/) fail("no label fr — not defined yet: /fr-workflow:new " ref)
+      # pass 1: criteria and open questions; # lines in code blocks are no headings
+      for (i = 1; i <= n; i++) {
+        l = L[i]
+        if (original(l)) continue
+        if (l ~ /^ *(```|~~~)/) fence = !fence
+        if (!fence && l ~ /^#+ /) { sec = tolower(l); sub(/^#+ +/, "", sec); sub(/ +$/, "", sec); continue }
+        if (sec == "acceptance criteria" && l ~ /^[-*] \[[ xX]\] +[^ ]/ && l !~ /\] +Criterion [0-9]+ *$/) crit++
+        if (sec == "open questions" && l ~ /^([-*]|[0-9]+\.) +[^ ]/) oq++
+      }
+      if (!crit) fail("no acceptance criteria (- [ ] lines under ## Acceptance criteria)")
+      if (oq) fail(oq " open question(s) under ## Open questions")
+      if (bad != "") { print "fr.sh: " ref " is not ready to start:" bad > "/dev/stderr"; exit 4 }
+      planning(all, "\n")
+      if (P["areas"] == "") print "fr.sh: warning: " ref " names no areas — it overlaps every other FR" > "/dev/stderr"
+      if (P["based on"] !~ /^[0-9a-f]+$/) print "fr.sh: warning: " ref " has no Based on commit — changes since its definition cannot be checked" > "/dev/stderr"
+      ar = csv(P["areas"]); gsub(/,/, ", ", ar); rq = reqs(P["requests"]); gsub(/,/, ", ", rq)
+      printf "---\nid: %s-%s\nissue: %s\ntitle: %s\nstatus: in-progress\nrequests: [%s]\nareas: [%s]\n", pre, num, ref, M[3], rq, ar
+      printf "model: %s\neffort: %s\nbased_on: %s\npr:\nstarted: %s\n---\n\n", P["model"], P["effort"], P["based on"], today
+      printf "# %s-%s: %s\n\nSpecified in %s. From the start on this document is the source: decisions\nand deviations go here, the issue is not updated.\n", pre, num, M[3], ref
+      # pass 2: the spec verbatim, without Planning and the original request;
+      # blank lines kept between content, dropped at the end
+      d = 0; fence = 0; plan = 0; blanks = 0; started = 0
+      for (i = 1; i <= n; i++) {
+        l = L[i]
+        if (original(l)) continue
+        if (l ~ /^ *(```|~~~)/) fence = !fence
+        if (!fence && l ~ /^#+ /) plan = (tolower(l) ~ /^## +planning *$/)
+        if (plan) continue
+        if (l ~ /^[ \t]*$/) { blanks++; continue }
+        if (!started) { blanks = 1; started = 1 }
+        for (; blanks > 0; blanks--) print ""
+        print l
+      }
+      printf "\n## Acceptance check\n\nFilled in by `/fr-workflow:ship`.\n"
+    }') || rc=$?
+  [ "$rc" = 0 ] || exit "$rc"
+  if [ -z "$out" ]; then printf '%s\n' "$doc"; return 0; fi
+  mkdir -p "$(dirname "$out")"
+  printf '%s\n' "$doc" > "$out"
+  echo "wrote $out"
 }
 
-# Rows computed once per run when ROWS is set (sync loops call frs_for often).
-ROWS=""
-all_rows() { if [ -n "$ROWS" ]; then printf '%s\n' "$ROWS"; else rows; fi; }
-
-# FR rows referencing a normalized issue ref (short refs in docs normalized too).
-frs_for() {
-  local ref="$1"
+# The FRs serving a request issue: the issue itself when it is an FR (label
+# fr), its sub-issues, and FR issues whose Planning lists it under Requests —
+# found through its timeline, where GitHub records every mention. Prints
+# ref state reason via title; reason completed|not_planned|duplicate when closed.
+cmd_issue_frs() {
+  [ $# -ge 1 ] || die "usage: fr.sh issue-frs <issue>"
+  command -v gh >/dev/null || die "gh not found"
+  local ref repo num self
+  ref=$(issue_ref "$1"); repo=${ref%%#*}; num=${ref##*#}
+  self=$(gh api "repos/$repo/issues/$num" --jq "$J_REST") || die "cannot read $ref"
   dr_init
-  all_rows | awk -v ref="$ref" -v dr="$DR" "$NORM_AWK"'
+  printf 'ref\tstate\treason\tvia\ttitle\n'
+  { printf '%s\n' "$self" | tag self
+    gh api "repos/$repo/issues/$num/sub_issues" --paginate --jq ".[] | $J_REST" | tag sub ||
+      echo "fr.sh: warning: could not read the sub-issues of $ref" >&2
+    gh api "repos/$repo/issues/$num/timeline" --paginate \
+      --jq ".[] | select(.event == \"cross-referenced\") | .source.issue | select(.pull_request == null) | $J_REST" |
+      tag requests || echo "fr.sh: warning: could not read the timeline of $ref" >&2
+  } | awk -v ref="$ref" -v dr="$DR" -v pre="$PREFIX" "$NORM_AWK$PLAN_AWK"'
     BEGIN { FS = OFS = "\t" }
     {
-      n = split($7, a, ",")
-      for (i = 1; i <= n; i++) if (canon(a[i]) == ref) { print; next }
+      r = canon($2); if (r in seen) next
+      fr = (("," $5 ",") ~ /,fr,/)
+      if ($1 == "self" && !fr) next
+      if ($1 == "requests") {
+        if (!fr) next
+        planning($7, "\037"); k = split(reqs(P["requests"]), a, ","); hit = 0
+        for (i = 1; i <= k; i++) if (a[i] == ref) hit = 1
+        if (!hit) next
+      }
+      seen[r] = 1; print r, $3, $4, $1, $6
     }'
-}
-
-# Issue refs an FR file listed in any committed version: hist_issues <gitref> <path>
-hist_issues() {
-  git log --format= -p "$1" -- "$2" 2>/dev/null | awk '
-    /^[-+]issues:/ {
-      s = substr($0, 2); sub(/^issues:[ \t]*/, "", s)
-      gsub(/\[/, "", s); gsub(/\]/, "", s); gsub(/ /, "", s)
-      n = split(s, a, ","); for (i = 1; i <= n; i++) if (a[i] != "") print a[i]
-    }'
-}
-
-cmd_issue_frs() {
-  [ $# -ge 1 ] || die "usage: fr.sh issue-frs <issue-ref>"
-  dr_init
-  local ref; ref=$(norm "$1"); shift
-  want_fetch "$@"
-  printf "$HEADER"
-  frs_for "$ref"
-}
-
-# sync_refs <dry 0|1> <ref>...   — the backlink upsert, one issue at a time
-sync_refs() {
-  local dry="$1"; shift
-  command -v gh >/dev/null || die "gh not found"
-  [ -n "$ROWS" ] || ROWS=$(rows)
-  dr_init
-
-  local frrepo raw ref irepo num table body ids id n
-  frrepo=$(cur_repo)
-  for raw in "$@"; do
-    ref=$(norm "$raw")
-    case "$ref" in
-      jira:*) echo "skip $ref: Jira is not supported in v1"; continue ;;
-      */*#[0-9]*) ;;
-      *) echo "skip $raw: not a GitHub issue ref"; continue ;;
-    esac
-    irepo=${ref%%#*}; num=${ref##*#}
-
-    table=$(frs_for "$ref" | awk -v repo="$frrepo" 'BEGIN { FS = "\t" }
-      {
-        if ($3 == "local") print "fr.sh: warning: " $1 " is not committed and pushed, its link will not resolve" > "/dev/stderr"
-        t = $8; gsub(/\|/, "\\|", t)
-        pr = ($6 == "") ? "—" : repo "#" $6
-        printf "| [%s](https://github.com/%s/blob/%s/%s) | %s | %s | %s |\n", $1, repo, $4, $5, t, $2, pr
-      }')
-
-    if [ -n "$table" ]; then
-      body=$(printf '%s\n**Feature requests for this issue**\n\n| FR | Title | Status | PR |\n|---|---|---|---|\n%s\n\n<sub>Maintained by fr-workflow from the FR documents in %s — manual edits are overwritten.</sub>' \
-        "$MARKER" "$table" "$frrepo")
-    else
-      body=$(printf '%s\n**Feature requests for this issue**\n\nNo feature request references this issue (any more).\n\n<sub>Maintained by fr-workflow from the FR documents in %s — manual edits are overwritten.</sub>' \
-        "$MARKER" "$frrepo")
-    fi
-
-    if [ "$dry" = 1 ]; then
-      printf '=== %s (dry run, nothing posted)\n%s\n' "$ref" "$body"
-      continue
-    fi
-
-    # The oldest marker comment is the backlink; extra ones (left by parallel
-    # syncs) are generated copies and get deleted. All ids are read first — no
-    # head -n 1, which could SIGPIPE gh under pipefail.
-    ids=$(gh api "repos/$irepo/issues/$num/comments" --paginate \
-      --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id")
-    if [ -n "$ids" ]; then
-      n=0
-      for id in $ids; do
-        n=$((n + 1))
-        if [ "$n" = 1 ]; then
-          printf '%s updated: ' "$ref"
-          gh api -X PATCH "repos/$irepo/issues/comments/$id" -f body="$body" --jq .html_url
-        elif gh api -X DELETE "repos/$irepo/issues/comments/$id" >/dev/null 2>&1; then
-          echo "$ref: removed duplicate backlink comment $id"
-        else
-          # a parallel sync deleted it already, or no permission: keep going
-          echo "fr.sh: note: could not delete duplicate backlink comment $id on $ref"
-        fi
-      done
-    elif [ -n "$table" ]; then
-      printf '%s created: ' "$ref"
-      gh api "repos/$irepo/issues/$num/comments" -f body="$body" --jq .html_url
-    else
-      echo "$ref: no FR and no backlink comment — nothing to do"
-    fi
-  done
-}
-
-cmd_sync() {
-  local refs="" a dry=0
-  for a in "$@"; do
-    case "$a" in
-      --no-fetch) ;;
-      --dry-run) dry=1 ;;
-      *) refs="$refs $a" ;;
-    esac
-  done
-  [ -n "$refs" ] || die "usage: fr.sh sync <issue-ref>... [--dry-run]"
-  want_fetch "$@"
-  # shellcheck disable=SC2086 # refs never contain spaces
-  sync_refs "$dry" $refs
-}
-
-# All issues of the given FRs — current frontmatter plus every earlier version,
-# so an issue removed from `issues:` loses its entry too. No issues: no-op.
-cmd_sync_fr() {
-  local ids="" a dry=0 all=0
-  for a in "$@"; do
-    case "$a" in
-      --no-fetch) ;;
-      --dry-run) dry=1 ;;
-      --all) all=1 ;;
-      *) ids="$ids $a" ;;
-    esac
-  done
-  [ -n "$ids" ] || [ "$all" = 1 ] || die "usage: fr.sh sync-fr <FR-id>...|--all [--dry-run]"
-  want_fetch "$@"
-  ROWS=$(rows)
-  [ "$all" = 1 ] && ids=$(printf '%s\n' "$ROWS" | cut -f1)
-
-  local id row loc ref path cur gref iss refs=""
-  dr_init
-  for id in $ids; do
-    row=$(printf '%s\n' "$ROWS" | awk -F '\t' -v id="$id" '$1 == id')
-    if [ -z "$row" ]; then echo "$id: no such FR"; continue; fi
-    loc=$(printf '%s' "$row" | cut -f3)
-    ref=$(printf '%s' "$row" | cut -f4)
-    path=$(printf '%s' "$row" | cut -f5)
-    cur=$(printf '%s' "$row" | cut -f7)
-    gref=$(git_ref_for "$loc" "$ref")
-    iss=$({ printf '%s\n' "$cur" | tr ',' '\n'; hist_issues "$gref" "$path"; } |
-      awk -v dr="$DR" "$NORM_AWK"' NF { print canon($0) }' | sort -u | tr '\n' ' ')
-    if [ -z "${iss// /}" ]; then echo "$id: no linked issues — nothing to sync"; continue; fi
-    refs="$refs $iss"
-  done
-  refs=$(printf '%s\n' $refs | sort -u | tr '\n' ' ')
-  [ -n "${refs// /}" ] || return 0
-  # shellcheck disable=SC2086
-  sync_refs "$dry" $refs
 }
 
 # Paths an FR touches: its declared `areas` plus the files its branch (or the
@@ -489,7 +494,7 @@ touched() { # <row>
   local id loc ref areas bref mb idl name
   id=$(printf '%s' "$1" | cut -f1)
   loc=$(printf '%s' "$1" | cut -f3); ref=$(printf '%s' "$1" | cut -f4)
-  areas=$(printf '%s' "$1" | cut -f9)
+  areas=$(printf '%s' "$1" | cut -f10)
   bref=$(base_ref)
   idl=$(printf '%s' "$id" | tr '[:upper:]' '[:lower:]')
   { printf '%s\n' "$areas" | tr ',' '\n'
@@ -639,6 +644,7 @@ cmd_check() {
     echo "repo:     MISSING — no GitHub 'origin' remote"; ok=0
   fi
   if [ -f "$PROFILE" ]; then echo "profile:  $PROFILE"; else echo "profile:  MISSING ($PROFILE) — run /fr-workflow:init"; ok=0; fi
+  echo "issues:   $(cfg issue_repo "${repo:-?}")"
   echo "fr_dir:   $FR_DIR   prefix: $PREFIX   base: $BASE"
   if command -v gh >/dev/null; then
     if gh auth status >/dev/null 2>&1; then echo "gh:       ok"; else echo "gh:       NOT LOGGED IN — gh auth login"; ok=0; fi
@@ -652,11 +658,9 @@ cmd="${1:-}"; [ $# -gt 0 ] && shift
 case "$cmd" in
   check) cmd_check ;;
   list) cmd_list "$@" ;;
-  next-id) cmd_next_id "$@" ;;
+  spec) cmd_spec "$@" ;;
   issue-frs) cmd_issue_frs "$@" ;;
-  sync) cmd_sync "$@" ;;
-  sync-fr) cmd_sync_fr "$@" ;;
   overlap) cmd_overlap "$@" ;;
   lock) cmd_lock "$@" ;;
-  *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

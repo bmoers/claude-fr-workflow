@@ -1,14 +1,14 @@
 ---
 base_branch: main
 fr_dir: req/feature-requests
-fr_prefix: FR
-id_digits: 3
+fr_prefix: FR                     # FR-47 = issue #47
 branch_pattern: "{type}/{id-lower}-{slug}"
-issue_repo:                       # owner/repo of the issues; empty = this repository
-backlinks: on                     # on | off — backlink comment on linked issues
+issue_repo:                       # owner/repo of requests and FR issues; empty = this repository
+project:                          # GitHub project (title) for the FR issues; empty = none
 notify_issues: ask                # never | ask | always — "ready for acceptance" comment
 review_gate: stop                 # stop | report — what :ship does on code review findings
 security_gate: stop               # stop | report — what :ship does on security review findings
+review_agents: [silent-failure-hunter]   # :ship's extra reviewers, also type-design-analyzer; [] = none
 deploy_signal: none               # none | pr-checks | pr-comment | url
 deploy_comment_marker:            # pr-comment: text identifying the deploy comment
 deploy_success_marker:            # pr-comment: text that means success
@@ -46,8 +46,8 @@ new advisory appears anywhere in the tree. -->
 
 ## CI
 
-<!-- which PR checks matter, typical duration; whether pushes of FR-doc-only
-commits (from :new and :start) trigger builds, and how that is handled -->
+<!-- which PR checks matter, typical duration; whether the FR-doc-only first
+push of a new FR branch (from :start) triggers builds, and how that is handled -->
 
 
 ## Test environment

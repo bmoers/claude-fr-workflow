@@ -1,11 +1,13 @@
 name: Feature request
-description: Ask for a change or a new feature. The team plans it into one or more feature requests (FRs).
+description: Ask for a change or a new feature. The team works it out into one or more feature requests (FRs).
 labels: ["fr-request"]
 body:
   - type: markdown
     attributes:
       value: |
         Describe what you need in your own words — no technical knowledge needed.
+        The team works it out into a detailed specification, often in this very
+        issue: your text is then kept at its end.
         **Never put passwords, tokens or personal data of customers into an issue.**
   - type: textarea
     id: problem

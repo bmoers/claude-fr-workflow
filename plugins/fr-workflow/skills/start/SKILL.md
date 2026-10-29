@@ -1,7 +1,7 @@
 ---
 name: start
-description: Start implementing one or more FRs — a worktree per FR on its branch, status in-progress, then a fresh Claude session per FR. Several FRs that do not overlap run in parallel as background sessions.
-argument-hint: "<FR id> [more FR ids…]"
+description: Start implementing one or more FRs — pulls each FR issue, checks it against the current code, creates branch, worktree and FR doc, then a fresh Claude session per FR. Several FRs that do not overlap run in parallel as background sessions.
+argument-hint: "<#47 | FR-47> [more…]"
 disable-model-invocation: true
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh *)
 ---
@@ -11,7 +11,8 @@ allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh *)
 Read `${CLAUDE_PLUGIN_ROOT}/reference/model.md` and `.claude/workflow.md`.
 `${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh check` must pass.
 
-FRs: $ARGUMENTS — none given → `fr.sh list`, offer the `open` FRs, ask.
+FRs: $ARGUMENTS — `#47`, `47`, `FR-47` or issue URLs. None given → `fr.sh list`,
+offer the `open` FRs and the `in-progress` ones to resume, ask.
 
 Work from the **main worktree** — `claude -w` resolves worktree names there:
 `cd "$(git worktree list --porcelain | sed -n '1s/^worktree //p')"` (keeps paths
@@ -19,46 +20,70 @@ with spaces intact).
 
 ## 1. Check each FR
 
-From `fr.sh list`:
+From `fr.sh list`, by its id `<fr_prefix>-<number>`:
 
-- `location: branch` → `ref` is its branch.
-- `location: base` with `status: open` (committed to the base branch directly) →
-  create its branch from `branch_pattern` off `origin/<base_branch>`.
-- `in-progress` or `in-review` → a worktree may exist (`git worktree list`); reuse
-  it, never create a second one.
+- `open` (location `issue`) → a **new start**. `fr.sh spec <issue>` prints the FR
+  doc it would write — read it, it is the session's whole brief — or exits 4 with
+  the reasons the issue is not ready: leave the FR out, show them; it is
+  finished with `/fr-workflow:new <issue>`.
+- `in-progress` or `in-review` → **resume**: a worktree may exist
+  (`git worktree list`); reuse it, never create a second one. Nothing is pulled
+  from the issue — the FR doc is the source.
 - `merged` or `dropped` → leave it out and say so.
-- **Gate:** acceptance criteria still the template placeholders or empty → leave
-  it out. It is not specified yet; that is session-1 work (`/fr-workflow:new`).
+- Not listed → no open FR issue: closed, or not defined yet (`/fr-workflow:new`).
 
-## 2. Several FRs: what may run in parallel
+## 2. Has the code moved since the definition?
+
+Per new start, with `based_on` and `areas` from the printed doc:
+`git log --oneline <based_on>..origin/<base_branch> -- <areas>`.
+
+- Nothing → the spec still fits.
+- Commits → read their changes in the areas against the *Technical notes*, and
+  say what no longer fits. The user decides: start anyway — the session adapts
+  and records it in the FR doc — or refine first with `/fr-workflow:new <issue>`.
+- `based_on` empty or unknown here (`git cat-file -e <based_on>` fails) → say so;
+  the user decides.
+
+## 3. Several FRs: what may run in parallel
 
 `fr.sh overlap <ids> --no-fetch` lists conflicts and waves. Start **wave 1** only.
 Show the other waves with the reason for each conflict, and that they can start
 once the conflicting FR is merged — or now, if the user accepts the overlap.
 
-## 3. Prepare each FR to start
+## 4. Prepare each FR
 
-1. `git worktree add .claude/worktrees/<id-lower>-<slug> <branch>` — git creates the
-   local tracking branch from origin.
+**New start:**
+
+1. Branch name from `branch_pattern`: `{type}` from the FR (`feat`, `fix`, …;
+   unclear → ask), slug = 3–5 words of the title, lowercase ASCII joined with
+   `-` (ä→ae, ö→oe, ü→ue, ß→ss, accents dropped). A branch for this FR exists
+   already (`git branch -a --list '*<id-lower>-*'`) → it was started before:
+   stop and say so.
+2. `git worktree add -b <branch> .claude/worktrees/<id-lower>-<slug> origin/<base_branch>`
+   — a new branch off the base branch, never the user's branch.
+3. `fr.sh spec <issue> .claude/worktrees/<id-lower>-<slug>/<fr_dir>/<ID>-<slug>.md`.
+4. In the worktree, commit it (`docs(fr): start <ID>` or the project's
+   convention). After the commit, before pushing: check the doc for credentials
+   or personal data, and run the profile's secret scan on the commit if there is
+   one. Then `git push -u origin <branch>` — the branch holds nothing but the FR
+   doc.
+
+**Resume:**
+
+1. No worktree yet → `git worktree add .claude/worktrees/<id-lower>-<slug> <branch>`
+   (slug from the FR doc's file name); git creates the local branch from origin.
 2. A local branch that existed already may be behind origin (someone pushed to
    it): when `origin/<branch>` exists, `git merge --ff-only origin/<branch>` in
    the worktree — name it explicitly, the upstream may be the base branch. Not a
    fast-forward (both sides moved) → leave this FR out and say so; never rebase or
    force.
-3. **`open` FR:** in the worktree set `status: in-progress`, commit
-   (`docs(fr): start <ID>` or the project's convention). Push only if the branch
-   has no unpushed code: `git log <since>..HEAD -- . ':(exclude)<fr_dir>'` must
-   **succeed** and print nothing — `<since>` is `origin/<branch>`, or
-   `$(git merge-base origin/<base_branch> HEAD)` when the branch was never pushed.
-   A failing command means: do not push. Code leaves the machine only through
-   `:ship`. Then `fr.sh sync-fr <ID> --no-fetch`.
-   **`in-progress` or `in-review` FR being resumed:** change nothing, push nothing
-   — its worktree may hold unreviewed local commits, and a push to a branch with an
-   open PR can deploy.
-4. Model and effort: the FR's `model` and `effort` from the frontmatter, else the
-   profile's `impl_model` and `impl_effort`, else `opus` and `high`.
+3. Change nothing, push nothing — the worktree may hold unreviewed local commits,
+   and a push to a branch with an open PR can deploy.
 
-## 4. Start the sessions
+Model and effort: the FR doc's `model` and `effort`, else the profile's
+`impl_model` and `impl_effort`, else `opus` and `high`.
+
+## 5. Start the sessions
 
 The command for an FR:
 
@@ -86,9 +111,10 @@ the title (it often comes from customer-written issues). The prompt:
   trusted*, the user must run `claude` once in the repository and accept the
   trust prompt — never work around it.
 
-## 5. Hand over
+## 6. Hand over
 
-Report per FR: worktree, model and effort, session name. Then how to follow them:
+Report per FR: worktree, model and effort, session name, and whether the code had
+moved since the definition. Then how to follow them:
 
 | To                                    | Run                    |
 | ------------------------------------- | ---------------------- |
