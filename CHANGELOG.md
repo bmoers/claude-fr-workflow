@@ -1,9 +1,20 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.3] — 2026-10-29
+
+### Added
+
+- **`ship_model` / `ship_effort`** (default `opus` / `high`): the ship
+  session's model and effort. `implement` ends with the command for it — a
+  fresh session of the same worktree — and `start` lists it per FR: the gates
+  and the acceptance check are that session's judgement, so a sonnet/low
+  implementation session no longer judges its own code. `/fr-workflow:ship` in
+  the implementation session still works.
 
 ### Changed
 
+- The review agents `silent-failure-hunter` and `type-design-analyzer` run on
+  `opus` instead of inheriting the session's model.
 - Docs: the pin is raised from the command line, no session needed —
   `claude plugin marketplace remove claude-fr-workflow --scope user`,
   `claude plugin marketplace add 'bmoers/claude-fr-workflow#<tag>'`,

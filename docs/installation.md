@@ -38,7 +38,7 @@ whatever other plugins and skills they use.
    {
      "extraKnownMarketplaces": {
        "claude-fr-workflow": {
-         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.5.2" }
+         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.5.3" }
        }
      },
      "enabledPlugins": { "fr-workflow@claude-fr-workflow": true }
@@ -103,7 +103,7 @@ Repositories pin a version, so nobody gets changes by surprise.
 
    ```
    claude plugin marketplace remove claude-fr-workflow --scope user
-   claude plugin marketplace add 'bmoers/claude-fr-workflow#v0.5.2'
+   claude plugin marketplace add 'bmoers/claude-fr-workflow#v0.5.3'
    cd <repository>
    claude plugin install fr-workflow@claude-fr-workflow -s project
    claude plugin list                                        # Version: the new tag, Scope: project
