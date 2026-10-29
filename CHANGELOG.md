@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Docs: the pin is raised from the command line, no session needed —
+  `claude plugin marketplace remove claude-fr-workflow --scope user`,
+  `claude plugin marketplace add 'bmoers/claude-fr-workflow#<tag>'`,
+  `claude plugin install … -s project` in the repository. `remove` without
+  `--scope`, run inside a repository, also strips the plugin entries from its
+  `.claude/settings.json`.
+
 ## [0.5.2] — 2026-10-29
 
 ### Added

@@ -98,32 +98,32 @@ Repositories pin a version, so nobody gets changes by surprise.
 3. Every developer, after pulling: Claude Code registers a marketplace **once
    per machine**, with the `ref` of the first repository that brought it, and a
    later repository with another `ref` does not change that. So on a machine
-   that already has it:
+   that already has it, re-register it at the new tag, then install the plugin
+   in the repository:
 
    ```
-   claude plugin marketplace remove claude-fr-workflow
-   ```
-
-   then **start `claude` in the repository** — an interactive session; a
-   headless `claude -p` registers nothing — and accept the plugin when asked:
-   that registers the marketplace at the pinned `ref`. Then, in the
-   repository:
-
-   ```
+   claude plugin marketplace remove claude-fr-workflow --scope user
+   claude plugin marketplace add 'bmoers/claude-fr-workflow#v0.5.2'
+   cd <repository>
    claude plugin install fr-workflow@claude-fr-workflow -s project
    claude plugin list                                        # Version: the new tag, Scope: project
    ```
 
-   and start a new session. `/plugin marketplace update` on its own
-   is not enough — it refreshes the marketplace at the `ref` it was registered
-   with, i.e. the old version. One machine, one `ref`: repositories that share
-   a machine raise their pins together. Never install the plugin at user scope
-   — it would override every pin.
+   and start a new session. Keep `--scope user` on the `remove`: without it,
+   run inside a repository, it also deletes the plugin entries from that
+   repository's `.claude/settings.json` — the pin is gone until
+   `git checkout -- .claude/settings.json` brings it back.
+   `/plugin marketplace update` on its own is not enough — it refreshes the
+   marketplace at the `ref` it was registered with, i.e. the old version. One
+   machine, one `ref`: repositories that share a machine raise their pins
+   together. Never install the plugin at user scope — it would override every
+   pin.
 
 ## Headless runs (`claude -p`, scripts, CI)
 
 Non-interactive runs do not load the plugin from the project settings. Point them
-at the marketplace copy that interactive sessions keep up to date:
+at the machine's marketplace copy, the one [updating](#updating-to-a-new-version)
+refreshes:
 
 ```bash
 claude -p "/fr-workflow:status" --plugin-dir ~/.claude/plugins/marketplaces/claude-fr-workflow/plugins/fr-workflow
@@ -149,17 +149,18 @@ the FR documents — they are plain Markdown and stay readable without the plugi
 
 ## Troubleshooting
 
-| Symptom                                                                   | Likely cause                                                                                                                                        | Fix                                                                                                                                                                       |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Plugin "fr-workflow" is enabled in project settings but isn't installed` | Claude Code could not clone the plugin repository: no read access, or git has no HTTPS credentials                                                  | check access, run `gh auth setup-git`, then `/plugin marketplace update claude-fr-workflow`                                                                               |
-| No `/fr-workflow:` commands and no message                                | the folder is not trusted — Claude Code ignores the plugin entry there without a word                                                               | start `claude` in the repository root and accept the trust dialog                                                                                                         |
-| The plugin is listed under **Errors** in `/plugin`                        | see the message there                                                                                                                               | —                                                                                                                                                                         |
-| `profile: MISSING` when a command starts                                  | `/fr-workflow:init` not run, or its result not merged yet                                                                                           | run it, merge it                                                                                                                                                          |
-| `gh: NOT LOGGED IN`                                                       | —                                                                                                                                                   | `gh auth login`                                                                                                                                                           |
-| `/fr-workflow:new` cannot add an issue to the project                     | the `gh` token lacks the `project` scope                                                                                                            | `gh auth refresh -s project`                                                                                                                                              |
-| `project status not written` in a command's report                        | the `gh` token lacks the `project` scope, `gh` is older than 2.97, or the project's title or a status value in the profile does not match the board | `gh auth refresh -s project`; upgrade `gh`; compare with `gh project list --owner <owner>` and the column's options                                                       |
-| `npx: command not found` when Playwright starts                           | Node.js missing, or not on the `PATH` of the terminal that started Claude Code                                                                      | install Node.js; start `claude` from a terminal where `npx` works                                                                                                         |
-| Playwright tools appear twice                                             | your own server and the plugin's                                                                                                                    | disable one in `/mcp`                                                                                                                                                     |
-| `Workspace not trusted` when `start` launches background sessions         | background sessions only run in a trusted folder                                                                                                    | run `claude` once in the repository root and accept the trust prompt                                                                                                      |
-| `/plugin` still shows the old version after the `ref` was raised          | the marketplace is still registered at the old `ref` (one registration per machine), or the plugin is installed at user scope                       | `claude plugin marketplace remove claude-fr-workflow`, uninstall a user-scope install, start a new session in the repository — see [updating](#updating-to-a-new-version) |
-| `/fr-workflow:…` unknown in `claude -p`                                   | headless runs do not load project plugins                                                                                                           | add `--plugin-dir` — see [headless runs](#headless-runs-claude--p-scripts-ci)                                                                                             |
+| Symptom                                                                                                           | Likely cause                                                                                                                                        | Fix                                                                                                                                                                       |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Plugin "fr-workflow" is enabled in project settings but isn't installed`                                         | Claude Code could not clone the plugin repository: no read access, or git has no HTTPS credentials                                                  | check access, run `gh auth setup-git`, then `/plugin marketplace update claude-fr-workflow`                                                                               |
+| No `/fr-workflow:` commands and no message                                                                        | the folder is not trusted — Claude Code ignores the plugin entry there without a word                                                               | start `claude` in the repository root and accept the trust dialog                                                                                                         |
+| The plugin is listed under **Errors** in `/plugin`                                                                | see the message there                                                                                                                               | —                                                                                                                                                                         |
+| `profile: MISSING` when a command starts                                                                          | `/fr-workflow:init` not run, or its result not merged yet                                                                                           | run it, merge it                                                                                                                                                          |
+| `gh: NOT LOGGED IN`                                                                                               | —                                                                                                                                                   | `gh auth login`                                                                                                                                                           |
+| `/fr-workflow:new` cannot add an issue to the project                                                             | the `gh` token lacks the `project` scope                                                                                                            | `gh auth refresh -s project`                                                                                                                                              |
+| `project status not written` in a command's report                                                                | the `gh` token lacks the `project` scope, `gh` is older than 2.97, or the project's title or a status value in the profile does not match the board | `gh auth refresh -s project`; upgrade `gh`; compare with `gh project list --owner <owner>` and the column's options                                                       |
+| `npx: command not found` when Playwright starts                                                                   | Node.js missing, or not on the `PATH` of the terminal that started Claude Code                                                                      | install Node.js; start `claude` from a terminal where `npx` works                                                                                                         |
+| Playwright tools appear twice                                                                                     | your own server and the plugin's                                                                                                                    | disable one in `/mcp`                                                                                                                                                     |
+| `Workspace not trusted` when `start` launches background sessions                                                 | background sessions only run in a trusted folder                                                                                                    | run `claude` once in the repository root and accept the trust prompt                                                                                                      |
+| `/plugin` still shows the old version after the `ref` was raised                                                  | the marketplace is still registered at the old `ref` (one registration per machine), or the plugin is installed at user scope                       | uninstall a user-scope install, re-register the marketplace at the tag — see [updating](#updating-to-a-new-version)                                                       |
+| `/fr-workflow:` commands gone; `enabledPlugins` and `extraKnownMarketplaces` in `.claude/settings.json` are empty | `claude plugin marketplace remove` without `--scope` was run inside the repository: it strips the plugin entries from the project settings too      | `git checkout -- .claude/settings.json`, then [updating](#updating-to-a-new-version) step 3                                                                               |
+| `/fr-workflow:…` unknown in `claude -p`                                                                           | headless runs do not load project plugins                                                                                                           | add `--plugin-dir` — see [headless runs](#headless-runs-claude--p-scripts-ci)                                                                                             |
