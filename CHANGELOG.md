@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`fr.sh project-options`:** adds the values of `project_status` that the
+  board's status column lacks, keeping existing options with id, colour and
+  text; `init` offers it and names the *Workflows* page for what has no API.
+
 ### Changed
 
 - **Language of what goes to GitHub:** FR issues, comments and PR descriptions

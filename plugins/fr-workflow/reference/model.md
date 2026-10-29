@@ -205,6 +205,7 @@ written.
 | `overlap [<ID>...]`                         | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now |
 | `lock acquire\|release\|break\|status <ID>` | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs                                                                                  |
 | `project-status <issue> <event>`            | the board column of an FR issue per `project_status`: `defined`, `input`, `running`, `failed`, `blocked`, `approval`, `done`. Exit 5 = not written, reason on stderr — a line for the report, never a stop               |
+| `project-options [<value>...]`              | adds the values of `project_status` (or the given ones) that the status column lacks; existing options keep id, colour and text. Prints the project's *Workflows* page. Exit 5 = nothing changed, reason on stderr       |
 
 `location` is `issue` (not started; `ref` is the issue), `base`, `branch` (then
 `ref` is the branch) or `local` (uncommitted in this checkout). `list` and

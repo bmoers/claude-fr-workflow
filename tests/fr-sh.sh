@@ -39,6 +39,8 @@ case "$*" in
   "project item-add"*) [ ! -f "$STUB/item-add-fails" ] || { echo "could not resolve to a node with the global id" >&2; exit 1; } ;;
   "project item-edit"*) [ ! -f "$STUB/item-edit-fails" ] || { echo "option 'Complete' not found for field 'Status'" >&2; exit 1; } ;;
   "--version") answer version ;;
+  "api graphql -f query="*) answer options ;;
+  "api graphql --input -"*) cat > "$STUB/mutation.in"; [ ! -f "$STUB/mutation-fails" ] || { echo "Field 'singleSelectOptions' nope" >&2; exit 1; }; answer mutated ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 1 ;;
 esac
 EOF
@@ -312,6 +314,34 @@ printf -- '---\nfr_prefix: R2\nissue_repo: Acme/Requests\nproject: shop ROADMAP\
 check "project-status: title regardless of case, own field name, unquoted mapping, spaces around =, URL ref" '[ "$rc" = 0 ] && grep -qx "project item-edit 3 --owner acme --url https://github.com/acme/requests/issues/47 --field Stand --value Fertig" "$STUB_LOG"' "exit $rc: $(cat "$SP/ps.out" "$STUB_LOG")"
 "$FR" check > "$SP/check.out" 2>&1
 check "check shows the project and its status column" 'grep -q "project:  shop ROADMAP   status column: Stand, written by the skills" "$SP/check.out"' "$(cat "$SP/check.out")"
+
+# --- project-options: the status column gets the mapping's values
+printf -- '---\nfr_prefix: R2\nissue_repo: Acme/Requests\nproject: Shop roadmap\nproject_status: "defined=Ready, running=Running, input=Waiting for Input, approval=Waiting for Input, done=Complete"\n---\n' > .claude/workflow.md
+stub projects "$(printf '3\tShop roadmap\thttps://github.com/users/acme/projects/3\n7\tOther board\thttps://github.com/users/acme/projects/7')"
+stub options "$(printf 'PVTSSF_x\nf75\tGREEN\tReady\tThis item has not been started\n47f\tYELLOW\tRunning\t')"
+stub mutated "Ready, Running, Waiting for Input, Complete"
+nostub mutation.in; : > "$STUB_LOG"
+"$FR" project-options > "$SP/po.out" 2>&1; rc=$?
+check "project-options: adds the missing values once, existing ones go back with id, colour and text" '[ "$rc" = 0 ] && grep -q "added Waiting for Input, Complete to .Status. of .Shop roadmap. — now: Ready, Running, Waiting for Input, Complete" "$SP/po.out" && grep -q "^api graphql -f query={ repositoryOwner(login: \"acme\") { ... on ProjectV2Owner { projectV2(number: 3) { field(name: \"Status\")" "$STUB_LOG" && grep -qF "\"fieldId\":\"PVTSSF_x\",\"singleSelectOptions\":[{\"id\":\"f75\",\"name\":\"Ready\",\"color\":\"GREEN\",\"description\":\"This item has not been started\"},{\"id\":\"47f\",\"name\":\"Running\",\"color\":\"YELLOW\",\"description\":\"\"},{\"name\":\"Waiting for Input\",\"color\":\"GRAY\",\"description\":\"\"},{\"name\":\"Complete\",\"color\":\"GRAY\",\"description\":\"\"}]" "$STUB/mutation.in"' "exit $rc: $(cat "$SP/po.out"; cat "$STUB/mutation.in" 2>/dev/null)"
+check "project-options: names the workflows page of the project" 'grep -q "https://github.com/users/acme/projects/3/workflows" "$SP/po.out"' "$(cat "$SP/po.out")"
+nostub mutation.in; : > "$STUB_LOG"
+"$FR" project-options ready > "$SP/po.out" 2>&1; rc=$?
+check "project-options: a value the column has (case does not matter) changes nothing" '[ "$rc" = 0 ] && grep -q "has every value — Ready, Running" "$SP/po.out" && [ ! -f "$STUB/mutation.in" ]' "exit $rc: $(cat "$SP/po.out")"
+"$FR" project-options Blocked 'Say "hi"' > "$SP/po.out" 2>&1; rc=$?
+check "project-options: explicit values, JSON escaping" '[ "$rc" = 0 ] && grep -qF "{\"name\":\"Blocked\",\"color\":\"GRAY\",\"description\":\"\"},{\"name\":\"Say \\\"hi\\\"\",\"color\":\"GRAY\",\"description\":\"\"}]" "$STUB/mutation.in"' "exit $rc: $(cat "$SP/po.out"; cat "$STUB/mutation.in" 2>/dev/null)"
+stub mutation-fails ""
+"$FR" project-options Blocked > "$SP/po.out" 2>&1; rc=$?
+check "project-options: failed mutation → exit 5 with gh's reason" '[ "$rc" = 5 ] && grep -q "options not added to .Status. of .Shop roadmap. — Field" "$SP/po.out"' "exit $rc: $(cat "$SP/po.out")"
+nostub mutation-fails
+stub options ""
+"$FR" project-options Blocked > "$SP/po.out" 2>&1; rc=$?
+check "project-options: column missing or not single-select → exit 5" '[ "$rc" = 5 ] && grep -q "no single-select column .Status." "$SP/po.out"' "exit $rc: $(cat "$SP/po.out")"
+printf -- '---\nfr_prefix: R2\nissue_repo: Acme/Requests\nproject: Shop roadmap\n---\n' > .claude/workflow.md
+"$FR" project-options > "$SP/po.out" 2>&1; rc=$?
+check "project-options: nothing to add from → usage error" '[ "$rc" = 1 ] && grep -q "no values" "$SP/po.out"' "exit $rc: $(cat "$SP/po.out")"
+printf -- '---\nfr_prefix: R2\nissue_repo: Acme/Requests\n---\n' > .claude/workflow.md
+"$FR" project-options Ready > "$SP/po.out" 2>&1; rc=$?
+check "project-options: no project in the profile → usage error" '[ "$rc" = 1 ] && grep -q "no project in the profile" "$SP/po.out"' "exit $rc: $(cat "$SP/po.out")"
 
 echo "--- $pass passed, $fail failed"
 [ "$fail" = 0 ]

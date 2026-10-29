@@ -254,6 +254,39 @@ in the issue's *Planning* before starting.
   PR waits for your merge, *done* after `done` — under the names your board
   uses. A board that cannot be written is a line in the report, never a stop.
 
+## Planning on the board
+
+The board shows, it does not drive. The commands write the status column at
+their events and never read it; what runs is decided by the issues (label
+`fr`, their *Planning*) and by the command you type. In practice:
+
+- **Intake.** Requests arrive through the issue form (label `fr-request`). Add
+  `label:fr-request` to the project's *Auto-add* filter if you want them on the
+  board too — in a column of their own, they have no status event — or keep the
+  board to FRs and triage requests in the issue list.
+- **Definition.** `/fr-workflow:new #<request>` or `/fr-workflow:new <idea>`
+  turns them into FR issues: cards in *Ready*, or in *Waiting for Input* when a
+  question was left open. Answer on the issue, then `/fr-workflow:new #<n>`
+  again.
+- **Prioritising.** Order, group, filter, add your own fields (Priority,
+  Iteration, Estimate) — the plugin ignores them, nothing breaks. *Size*,
+  *Model* and *Effort* of an FR live in its *Planning*; edit them in the issue
+  before starting.
+- **Starting.** Pick the cards and type `/fr-workflow:start #47 #48`; the
+  command tells you which of them can run side by side. Dragging a card to
+  *Running* starts nothing.
+- **Following.** *Running*, *Failed*, *Blocked*, *Waiting for Input* and
+  *Waiting for Approval* are written by `start` and `ship` as they go; the why
+  is in the command's report, not on the card. *Waiting for Approval* means:
+  merge the PR, then `/fr-workflow:done`.
+- **Closing.** `done` writes *Complete* for merged and dropped FRs; an issue
+  closed by hand gets there through the *Item closed* workflow.
+- **Setting it up.** `/fr-workflow:init` proposes the mapping;
+  `fr.sh project-options` adds the values the column lacks; the workflows
+  (*Item added* → your `defined` value, *Item closed* → your `done` value,
+  *Auto-add* with `is:issue label:fr`) are set on the project's *Workflows*
+  page — see [the profile](profile.md#board-status).
+
 ## Statuses
 
 | Status        | Meaning                                                                              | Set by                        |

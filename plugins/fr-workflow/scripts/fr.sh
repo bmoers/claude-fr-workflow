@@ -25,6 +25,9 @@
 #   fr.sh project-status <issue> <event>
 #                                  the FR's status column in the GitHub project,
 #                                  per project_status; exit 5 if not written
+#   fr.sh project-options [<value>...]
+#                                  add the values of project_status (or the given
+#                                  ones) that the status column does not have yet
 #
 # Issue refs: owner/repo#12, #12, 12 or FR-12 (issue repo), a GitHub issue URL.
 
@@ -663,6 +666,21 @@ gh_older_than() {
     END { exit old }'
 }
 
+# project_lookup <owner> <title>: PROJ_NUM and PROJ_URL of the open project with
+# that title under the owner — case does not matter, like `gh issue create
+# --project`. Exit 5 with the reason when the list fails or nothing matches.
+PROJ_NUM=""; PROJ_URL=""
+project_lookup() {
+  local out
+  if ! out=$(gh project list --owner "$1" --limit 100 --format json \
+        --jq '.projects[] | [(.number | tostring), .title, .url] | join("\t")' 2>&1); then
+    echo "fr.sh: cannot list the projects of $1 — $out (gh auth refresh -s project?)" >&2; exit 5
+  fi
+  PROJ_NUM=$(printf '%s\n' "$out" | awk -F '\t' -v t="$2" 'tolower($2) == tolower(t) { print $1; exit }')
+  PROJ_URL=$(printf '%s\n' "$out" | awk -F '\t' -v t="$2" 'tolower($2) == tolower(t) { print $3; exit }')
+  if [ -z "$PROJ_NUM" ]; then echo "fr.sh: no project '$2' under $1" >&2; exit 5; fi
+}
+
 cmd_project_status() {
   [ $# -eq 2 ] || die "usage: fr.sh project-status <issue> <event>"
   local ref event="$2" map title field owner url value out num ver
@@ -690,12 +708,7 @@ cmd_project_status() {
   field=$(cfg project_status_field Status)
   owner=${ref%%/*}
   url="https://github.com/${ref%%#*}/issues/${ref##*#}"
-  if ! out=$(gh project list --owner "$owner" --limit 100 --format json \
-        --jq '.projects[] | [(.number | tostring), .title] | join("\t")' 2>&1); then
-    echo "fr.sh: cannot list the projects of $owner — $out (gh auth refresh -s project?)" >&2; exit 5
-  fi
-  num=$(printf '%s\n' "$out" | awk -F '\t' -v t="$title" 'tolower($2) == tolower(t) { print $1; exit }')
-  if [ -z "$num" ]; then echo "fr.sh: no project '$title' under $owner — status not written" >&2; exit 5; fi
+  project_lookup "$owner" "$title"; num=$PROJ_NUM
   if ! out=$(gh project item-add "$num" --owner "$owner" --url "$url" 2>&1); then
     echo "fr.sh: cannot add $ref to '$title' — $out" >&2; exit 5
   fi
@@ -703,6 +716,77 @@ cmd_project_status() {
     echo "fr.sh: project status not written for $ref — $out" >&2; exit 5
   fi
   echo "project status: $ref → $value ($title)"
+}
+
+# The values of the status column. GitHub's `updateProjectV2Field` replaces the
+# whole option list, so every existing option goes back with its id, colour and
+# text: items keep their values and the project's workflows keep their targets.
+# New options are grey; the user colours them on the board. The workflows
+# themselves (Item added, Item closed, Auto-add) have no API — the report names
+# the page. Exit 5 = nothing changed, the reason on stderr.
+json_str() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
+
+cmd_project_options() {
+  local title field owner values v q fid existing names missing keep new_json body out
+  local oid ocolor oname odesc
+  title=$(cfg project "")
+  [ -n "$title" ] || die "no project in the profile"
+  field=$(cfg project_status_field Status)
+  if [ $# -gt 0 ]; then
+    values=$(printf '%s\n' "$@")
+  else
+    # every value of "k=v, k=v", once, in order
+    values=$(printf '%s' "$(cfg project_status "")" | awk 'BEGIN { RS = "," }
+      {
+        i = index($0, "="); if (i == 0) next
+        v = substr($0, i + 1); gsub(/^[ \t\n]+|[ \t\n]+$/, "", v)
+        if (v != "" && !(v in seen)) { seen[v]; print v }
+      }')
+  fi
+  [ -n "$values" ] || die "no values: give them as arguments, or set project_status in the profile"
+  command -v gh >/dev/null || die "gh not found"
+  dr_init; owner=${DR%%/*}
+  project_lookup "$owner" "$title"
+  # the column's options with everything the update must send back; the
+  # description comes last — it may be empty, a name cannot
+  if ! q=$(gh api graphql -f query="{ repositoryOwner(login: $(json_str "$owner")) { ... on ProjectV2Owner { projectV2(number: $PROJ_NUM) { field(name: $(json_str "$field")) { ... on ProjectV2SingleSelectField { id options { id name color description } } } } } } }" \
+        --jq '.data.repositoryOwner.projectV2.field | select(.id != null) | .id, (.options[] | [.id, .color, .name, .description] | join("\t"))' 2>&1) || [ -z "$q" ]; then
+    echo "fr.sh: no single-select column '$field' in project '$title' — $q" >&2; exit 5
+  fi
+  fid=$(printf '%s\n' "$q" | sed -n '1p')
+  existing=$(printf '%s\n' "$q" | sed '1d')
+  names=$(printf '%s\n' "$existing" | cut -f3)
+  missing=""
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    if ! printf '%s\n' "$names" | grep -qixF -- "$v"; then missing="$missing$v"$'\n'; fi
+  done <<EOF
+$values
+EOF
+  if [ -z "$missing" ]; then
+    echo "project options: '$field' of '$title' has every value — $(printf '%s\n' "$names" | paste -sd ',' - | sed 's/,/, /g')"
+    return 0
+  fi
+  keep=""
+  while IFS=$'\t' read -r oid ocolor oname odesc; do
+    [ -n "$oid" ] || continue
+    keep="$keep${keep:+,}{\"id\":$(json_str "$oid"),\"name\":$(json_str "$oname"),\"color\":$(json_str "$ocolor"),\"description\":$(json_str "$odesc")}"
+  done <<EOF
+$existing
+EOF
+  new_json=""
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    new_json="$new_json${new_json:+,}{\"name\":$(json_str "$v"),\"color\":\"GRAY\",\"description\":\"\"}"
+  done <<EOF
+$missing
+EOF
+  body="{\"query\":\"mutation(\$input: UpdateProjectV2FieldInput!) { updateProjectV2Field(input: \$input) { projectV2Field { ... on ProjectV2SingleSelectField { options { name } } } } }\",\"variables\":{\"input\":{\"fieldId\":$(json_str "$fid"),\"singleSelectOptions\":[${keep}${keep:+,}${new_json}]}}}"
+  if ! out=$(printf '%s' "$body" | gh api graphql --input - --jq '[.data.updateProjectV2Field.projectV2Field.options[].name] | join(", ")' 2>&1); then
+    echo "fr.sh: options not added to '$field' of '$title' — $out" >&2; exit 5
+  fi
+  echo "project options: added $(printf '%s' "$missing" | paste -sd ',' - | sed 's/,/, /g') to '$field' of '$title' — now: $out"
+  echo "workflows have no API — set them on $PROJ_URL/workflows: Item added to project → the 'defined' value, Item closed → the 'done' value, Auto-add to project with is:issue label:fr"
 }
 
 cmd_check() {
@@ -748,5 +832,6 @@ case "$cmd" in
   overlap) cmd_overlap "$@" ;;
   lock) cmd_lock "$@" ;;
   project-status) cmd_project_status "$@" ;;
-  *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  project-options) cmd_project_options "$@" ;;
+  *) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

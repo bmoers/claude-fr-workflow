@@ -79,8 +79,13 @@ Also propose:
   events — `defined`, `running`, `input`, `failed`, `blocked`, `approval`,
   `done` — onto those options, e.g.
   `defined=Todo, running=In Progress, approval=In Review, done=Done`, leaving
-  out events the board has no value for. Needs `gh` 2.97 or newer wherever the
-  commands run. Without the key GitHub's own workflows move the cards.
+  out events the board has no value for — or, when the user wants the plugin's
+  own vocabulary (Ready, Running, Waiting for Input, Waiting for Approval,
+  Blocked, Failed, Complete), values the column does not have yet:
+  `fr.sh project-options` adds them after the profile is written and the user
+  agreed (existing options keep their id, colour and text). Needs `gh` 2.97 or
+  newer wherever the commands run. Without the key GitHub's own workflows move
+  the cards.
 
 Show the proposed profile and all open questions in one message. Typical ones:
 test environment URL and how to get in, test accounts (names or roles, never
@@ -139,5 +144,8 @@ Do not commit unless the user asks. Report:
   closed* → Done is on by default; *Auto-add to project* with the filter
   `label:fr` also catches FR issues written by hand. With `project_status` the
   commands set the column themselves at every start and stop; keep *Item
-  closed* as the safety net;
+  closed* as the safety net. The workflows have no API: name the project's
+  *Workflows* page (`fr.sh project-options` prints it) and what to set there —
+  *Item added to project* → the `defined` value, *Item closed* → the `done`
+  value, *Auto-add to project* with `is:issue label:fr`;
 - the next step: `/fr-workflow:new` with an idea, or with issues.
