@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.1] — 2026-10-29
+
+First full end-to-end run of 0.5 in the sandbox, with the board: every event
+showed the expected status; the fixes below are what the run and its review
+asked for.
 
 ### Added
 

@@ -38,7 +38,7 @@ whatever other plugins and skills they use.
    {
      "extraKnownMarketplaces": {
        "claude-fr-workflow": {
-         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.5.0" }
+         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.5.1" }
        }
      },
      "enabledPlugins": { "fr-workflow@claude-fr-workflow": true }
