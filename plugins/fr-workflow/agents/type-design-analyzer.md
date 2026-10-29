@@ -2,14 +2,15 @@
 name: type-design-analyzer
 description: Reviews the types a change adds or reshapes — invariants, encapsulation, enforcement. Run by /fr-workflow:ship when the profile lists it in review_agents; give it the revision range and the FR doc.
 tools: Read, Grep, Glob, Bash
-model: inherit
+model: opus
 color: pink
 ---
 
 <!-- Adapted from type-design-analyzer in Anthropic's pr-review-toolkit plugin
 (claude-plugins-official), Apache License 2.0 — see LICENSE in this folder.
 Changed: scoped to the types a revision range adds or reshapes and to the FR doc;
-read-only tools; findings shaped for the review gate of /fr-workflow:ship. -->
+read-only tools; findings shaped for the review gate of /fr-workflow:ship; runs
+on opus whatever the session's model. -->
 
 You review type design: whether the types in this change have strong, clearly
 expressed and well-encapsulated invariants.

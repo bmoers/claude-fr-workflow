@@ -126,15 +126,26 @@ End the session here.
 From here the FR document is the source: decisions and deviations go into it, in
 the same commits as the code — the issue keeps the spec as it was. The session
 **commits but does not push** — code leaves your machine only through
-`/fr-workflow:ship`, after its review. The session ends with a summary; you then
-run `/fr-workflow:ship` in it.
+`/fr-workflow:ship`, after its review. The session ends with a summary and the
+command for the **ship session** — a fresh session of the same worktree with the
+profile's `ship_model` / `ship_effort` (default `opus` / `high`), because the
+gates and the acceptance check are that session's judgement, and the session
+that wrote the code is not the one to judge it:
+
+```bash
+claude -w fr-20-coupon-field-checkout --model opus --effort high -n 'FR-20 ship'
+```
+
+then `/fr-workflow:ship`. Running it in the implementation session works too —
+with that session's model.
 
 **Several FRs:** `/fr-workflow:start #20 #22 #23` — see
 [working in parallel](#working-in-parallel).
 
 ## Step 3 — Finish: `/fr-workflow:ship`
 
-Run it in the FR's worktree. It works through seven steps; each one can stop.
+Run it in the FR's ship session — step 2 names the command — or in the
+implementation session. It works through seven steps; each one can stop.
 
 | #   | Step                                                                                                                                                                                                                                                                                                                                                 | Stops when                                                                                                                      |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -221,7 +232,9 @@ effort. FRs of later waves are not started; it says why.
 | see FRs and sessions side by side     | `/fr-workflow:status`                                                                |
 
 A background session that needs a permission waits — `claude agents` shows it;
-attach to answer. When a session is done, attach and run `/fr-workflow:ship`.
+attach to answer. When a session is done, open its ship session — `start` listed
+the command per FR — and run `/fr-workflow:ship`; attaching and running it there
+works too.
 
 **Shipping in parallel.** PRs reach `main` one after another, so a later PR may
 conflict; `ship` then merges `main` into its branch, or stops if a conflict needs a

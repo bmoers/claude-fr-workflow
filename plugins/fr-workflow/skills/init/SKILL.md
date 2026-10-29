@@ -66,6 +66,8 @@ Also propose:
 - `impl_model` / `impl_effort`: `opus` / `high` unless the user wants otherwise;
   `size_models`: how the issue form's *Size* maps to model and effort — the
   template's default unless the user wants otherwise.
+- `ship_model` / `ship_effort`: `opus` / `high` — the session that reviews and
+  accepts; a weaker model here weakens every gate.
 - `review_agents`: add `type-design-analyzer` when the code is mostly in a typed
   language and models its own domain types (TypeScript, Java, C#, Kotlin, Rust,
   Go, Swift, typed Python); otherwise keep the default.

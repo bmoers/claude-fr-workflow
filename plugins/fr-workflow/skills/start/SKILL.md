@@ -86,7 +86,8 @@ once the conflicting FR is merged — or now, if the user accepts the overlap.
    board column is not a git change.
 
 Model and effort: the FR doc's `model` and `effort`, else the profile's
-`impl_model` and `impl_effort`, else `opus` and `high`.
+`impl_model` and `impl_effort`, else `opus` and `high`. The ship session's are
+the profile's `ship_model` and `ship_effort`, else `opus` and `high`.
 
 ## 5. Start the sessions
 
@@ -125,13 +126,16 @@ background session:
 > into it, in the same commits as the code. Run the profile's local checks and
 > commit. Do not push: /fr-workflow:ship pushes after its code and security
 > review. Never merge. When done, stop with a short summary of what you did and
-> what is open; the user then runs /fr-workflow:ship here.
+> what is open; the user then runs /fr-workflow:ship - in a fresh session of this
+> worktree with the profile's ship_model and ship_effort, or here.
 
 ## 6. Hand over
 
-Report per FR: worktree, model and effort, session name, and whether the code had
-moved since the definition; for one FR the command and `/fr-workflow:implement`.
-Then how to follow them:
+Report per FR: worktree, model and effort, session name, whether the code had
+moved since the definition, and the ship session's command for later —
+`claude -w <id-lower>-<slug> --model <ship_model> --effort <ship_effort> -n '<ID> ship'`
+(`implement` prints it again at its end); for one FR also the command above and
+`/fr-workflow:implement`. Then how to follow them:
 
 | To                                    | Run                    |
 | ------------------------------------- | ---------------------- |
@@ -141,5 +145,6 @@ Then how to follow them:
 | the FRs with their sessions           | `/fr-workflow:status`  |
 
 Background sessions stop at permission prompts and wait — `claude agents` shows
-them as waiting; attach to answer. Each one finishes with `/fr-workflow:ship` in its
-own session.
+them as waiting; attach to answer. Each one ends with a summary; then
+`/fr-workflow:ship` — in that FR's ship session, or attached in the background
+session with its model.

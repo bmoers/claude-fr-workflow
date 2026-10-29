@@ -19,6 +19,12 @@ show the evidence, the user decides. No improvised fixes.
 **Nothing leaves the machine before step 1 passed.** Implementation sessions
 commit without pushing; the first push of code is in step 2.
 
+**The session.** This skill is meant for the ship session — a session of the
+FR's worktree with the profile's `ship_model` / `ship_effort` (default `opus` /
+`high`; *Sessions* in the model): the gates and the acceptance check are its
+judgement. In the implementation session it works too, with that session's
+model. The review agents run on `opus` either way.
+
 **Shared test environment** (`test_env: shared` and `deploy_signal` not `none`):
 only one FR at a time may be between its first deploying event and its recorded
 acceptance check. `fr.sh lock acquire <ID>` at the **start of step 2** — before

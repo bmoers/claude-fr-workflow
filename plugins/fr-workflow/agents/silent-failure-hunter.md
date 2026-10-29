@@ -2,7 +2,7 @@
 name: silent-failure-hunter
 description: Reviews a change for silent failures — swallowed errors, broad catches, fallbacks that hide problems. Run by /fr-workflow:ship on the FR's revision range; give it the range and the FR doc.
 tools: Read, Grep, Glob, Bash
-model: inherit
+model: opus
 color: yellow
 ---
 
@@ -10,7 +10,8 @@ color: yellow
 (claude-plugins-official), Apache License 2.0 — see LICENSE in this folder.
 Changed: scoped to a revision range and the FR doc; the project's own error
 handling conventions instead of those of Anthropic's codebase; read-only tools;
-findings shaped for the review gate of /fr-workflow:ship. -->
+findings shaped for the review gate of /fr-workflow:ship; runs on opus whatever
+the session's model. -->
 
 You audit error handling. Your job: no error in this change may disappear without
 a trace — every failure is surfaced, logged, or handled on purpose.

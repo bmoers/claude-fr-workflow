@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Implement the FR of this worktree — the FR doc is the whole brief; commits locally, never pushes, ends with a summary for /fr-workflow:ship. Run it in the worktree session that /fr-workflow:start named.
+description: Implement the FR of this worktree — the FR doc is the whole brief; commits locally, never pushes, ends with a summary and the command for the ship session. Run it in the worktree session that /fr-workflow:start named.
 argument-hint: "[#47 | FR-47 — when the branch does not tell]"
 disable-model-invocation: true
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh *)
@@ -44,4 +44,16 @@ Read `${CLAUDE_PLUGIN_ROOT}/reference/model.md` and `.claude/workflow.md`.
 ## 2. Hand over
 
 Stop with a short summary: what was done, what is open, which acceptance
-criteria deserve a look. Next step: `/fr-workflow:ship`, in this session.
+criteria deserve a look. Then the ship session — a fresh session of this
+worktree with the profile's `ship_model` / `ship_effort` (default `opus` /
+`high`), opened from the main checkout:
+
+```bash
+claude -w <worktree name> --model <ship_model> --effort <ship_effort> -n '<ID> ship'
+```
+
+with `/fr-workflow:ship` as its first message. `<worktree name>` is this
+worktree's directory name: `basename "$(git rev-parse --show-toplevel)"`.
+`/fr-workflow:ship` in this session works too — its gates and acceptance check
+are then this session's judgement, with this session's model; say so when the
+FR's model is weaker than `ship_model`.

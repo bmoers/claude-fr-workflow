@@ -126,6 +126,24 @@ Every fr-workflow skill reads this first.
 - There is **no shared index file**: a table edited in every PR conflicts and
   drifts. The overview is `/fr-workflow:status`.
 
+## Sessions
+
+- The **implementation session** runs in the FR's worktree with the FR's
+  `model` and `effort` — `:start` names the command, `:implement` is its brief.
+  It commits, never pushes.
+- The **ship session** is a second session of the same worktree, opened from
+  the main checkout with the profile's `ship_model` / `ship_effort` (default
+  `opus` / `high`):
+  `claude -w <worktree> --model <ship_model> --effort <ship_effort> -n '<ID> ship'`,
+  then `/fr-workflow:ship`. The gates and the acceptance check are that
+  session's judgement, and the session that wrote the code is not the one to
+  judge it. `:implement` ends with this command; `:start` lists it per FR.
+  `:ship` in the implementation session works too — the judgement is then that
+  session's, with its model.
+- The review agents (`review_agents`) run on `opus` whatever the session's
+  model; `/code-review` runs as its own agent; `/security-review` runs in the
+  session.
+
 ## Parallel work
 
 - Two FRs may run at the same time when they do not touch the same paths.

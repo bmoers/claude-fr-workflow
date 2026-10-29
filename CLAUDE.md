@@ -64,7 +64,12 @@ pitfalls that the code does not show.
   form, label `fr-request`), FR issues `templates/fr.md` (label `fr`). Headings
   and Planning keys stay English — `fr.sh` parses them.
 - Model and effort per field: explicit values in the request are binding; else
-  its size via `size_models`; else `impl_model` / `impl_effort`.
+  its size via `size_models`; else `impl_model` / `impl_effort`. The ship
+  session has its own, `ship_model` / `ship_effort` (0.5.3): the gates and the
+  acceptance check judge with the session's model, so the implementation
+  session's choice must not weaken them — `implement` ends with the ship
+  session's command. The review agents run on `opus`, not `inherit`, for the
+  same reason.
 - `agents/` holds adapted copies of `silent-failure-hunter` and
   `type-design-analyzer` from Anthropic's `pr-review-toolkit` (Apache-2.0,
   `LICENSE` beside them): the originals assume Anthropic's own codebase (Sentry,
@@ -144,7 +149,8 @@ a new session there.
   GitHub first, sub-issues, project; `idea` and `sync` gone), review agents in
   `ship`, failure behaviour, board status · 0.5.1 board setup
   (`project-options`), the language of what goes to GitHub, first end-to-end
-  run of 0.5 with the board · 0.5.2 `implement`, the pin procedure. Details:
+  run of 0.5 with the board · 0.5.2 `implement`, the pin procedure · 0.5.3 the
+  ship session's own model, agents on `opus`. Details:
   [CHANGELOG.md](CHANGELOG.md).
 - Before 0.3.0, three `/code-review` rounds found 37, 23 and 19 issues. Recurring
   bug classes: `set -e` exit codes, git path quoting, ref normalization, branch

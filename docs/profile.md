@@ -41,6 +41,8 @@ tokens.
 | `impl_model`            | `opus`                                                        | default model of implementation sessions; an FR can set its own *Model*                                                                                                                                                                                                                                                                                         |
 | `impl_effort`           | `high`                                                        | default effort: `low`, `medium`, `high`, `xhigh`, `max`; an FR can set its own *Effort*                                                                                                                                                                                                                                                                         |
 | `size_models`           | `"S=sonnet/low, M=sonnet/medium, L=opus/high, XL=opus/xhigh"` | how the issue form's *Size* becomes model and effort. "Don't know" → `impl_model` / `impl_effort`. Explicit model/effort in the issue win over the size                                                                                                                                                                                                         |
+| `ship_model`            | `opus`                                                        | model of the ship session: its gates and the acceptance check are that session's judgement — see [usage](usage.md#step-2--build-fr-workflowstart-20). The review agents run on `opus` regardless                                                                                                                                                                   |
+| `ship_effort`           | `high`                                                        | effort of the ship session: `low`, `medium`, `high`, `xhigh`, `max`                                                                                                                                                                                                                                                                                             |
 | `shared_paths`          | `[]`                                                          | paths many FRs touch, e.g. `[package-lock.json, db/migrations]`. Two FRs that both change something under one of them never run in parallel                                                                                                                                                                                                                     |
 
 ## Choosing `deploy_signal`
@@ -159,6 +161,8 @@ test_env: shared
 acceptance_browser: playwright
 impl_model: opus
 impl_effort: high
+ship_model: opus
+ship_effort: high
 shared_paths: [package-lock.json, db/migrations, src/i18n]
 ---
 
