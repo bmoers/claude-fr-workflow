@@ -107,11 +107,14 @@ pitfalls that the code does not show.
   the pinned version. Prompts must carry the user's confirmations — skills stop
   at their gates otherwise.
 - A raised pin takes effect only after `claude plugin marketplace remove
-  claude-fr-workflow` and a **new session** in the repository: the marketplace
-  is registered once per machine with the first `ref` it was brought with, and
-  `/plugin marketplace update` keeps following that `ref`. One `ref` per
-  machine — the sandbox and any client repository on the same machine move
-  together. A user-scope install of the plugin overrides every pin: never.
+  claude-fr-workflow`, a session in the repository (`claude -p 'ok'` is
+  enough — it registers the marketplace at the pinned `ref`) and
+  `claude plugin install fr-workflow@claude-fr-workflow -s project` there: the
+  marketplace is registered once per machine with the first `ref` it was
+  brought with, and `/plugin marketplace update` keeps following that `ref`.
+  One `ref` per machine — the sandbox and any client repository on the same
+  machine move together. A user-scope install of the plugin overrides every
+  pin: never.
 - The auto-mode classifier refuses to create GitHub repositories and to merge
   PRs: the maintainer does those, in the sandbox too.
 - After a test, reset the sandbox: delete FR branches (remote and local), close
