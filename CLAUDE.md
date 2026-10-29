@@ -140,7 +140,8 @@ a new session there.
   GitHub first, sub-issues, project; `idea` and `sync` gone), review agents in
   `ship`, failure behaviour, board status · 0.5.1 board setup
   (`project-options`), the language of what goes to GitHub, first end-to-end
-  run of 0.5 with the board. Details: [CHANGELOG.md](CHANGELOG.md).
+  run of 0.5 with the board · 0.5.2 `implement`, the pin procedure. Details:
+  [CHANGELOG.md](CHANGELOG.md).
 - Before 0.3.0, three `/code-review` rounds found 37, 23 and 19 issues. Recurring
   bug classes: `set -e` exit codes, git path quoting, ref normalization, branch
   name rules, unpushed local commits, the order of secret removal. 0.3.1 came
