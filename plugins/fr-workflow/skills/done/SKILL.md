@@ -92,5 +92,8 @@ by `drop`.
      local commits are lost with `-D`.
    - Remote branch after a merge: nothing if GitHub deleted it; otherwise offer
      `git push origin --delete <branch>`. After a drop: keep it (see B.5).
-3. Report: issues closed, requests still open with their remaining FRs, cleanup
-   done.
+3. `fr.sh project-status <ID> done` — the FR id is its issue number, so this
+   needs no FR doc; the board column is final, merged or dropped (GitHub's
+   *Item closed* workflow may have set it already; exit 5 is a note, not a stop).
+4. Report: issues closed, requests still open with their remaining FRs, cleanup
+   done, the board status.

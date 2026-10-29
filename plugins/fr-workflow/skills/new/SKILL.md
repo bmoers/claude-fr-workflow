@@ -133,6 +133,10 @@ code you read.
    `create`, `gh issue edit <n> -R <repo> --add-project "<project>"` for a
    rewritten issue. Missing scope → tell the user to run
    `gh auth refresh -s project`, and go on without.
+   Then its board column, when the profile maps it (`project_status`):
+   `fr.sh project-status <n> defined` — `input` instead when the user left
+   something under *Open questions*. Exit 5 (not written) is a line in the
+   report, never a stop.
 5. **Notes to authors**, only on issues the current user
    (`gh api user -q .login`) did not open:
    - rewritten → `gh issue comment <n> -R <repo> --body "Worked out into a feature request — see the description. Your original text is kept at its end."`;

@@ -244,10 +244,15 @@ in the issue's *Planning* before starting.
   serves it without being its sub-issue appears in its timeline.
 - **An FR issue** is the spec as it was defined. Its *Development* box links the
   PR once `ship` opened it; the merge closes it.
-- **Your GitHub project**, if the profile names one, has every FR issue. GitHub's
-  built-in project workflows move the cards — *Item closed* → Done is on by
-  default; *Auto-add to project* with the filter `label:fr` catches FR issues
-  written by hand too.
+- **Your GitHub project**, if the profile names one, has every FR issue. By
+  default GitHub's built-in project workflows move the cards — *Item closed* →
+  Done is on by default; *Auto-add to project* with the filter `label:fr`
+  catches FR issues written by hand too. If the profile maps the plugin's events
+  to the board's status column (`project_status`), the commands set it
+  themselves: *defined* when the FR is ready, *running* from the start, *input*,
+  *blocked* or *failed* when a command stops and says why, *approval* when the
+  PR waits for your merge, *done* after `done` — under the names your board
+  uses. A board that cannot be written is a line in the report, never a stop.
 
 ## Statuses
 

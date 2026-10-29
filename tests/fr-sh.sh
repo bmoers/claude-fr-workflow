@@ -35,6 +35,10 @@ case "$*" in
   "api repos/"*/sub_issues*) answer subs ;;
   "api repos/"*/timeline*) answer timeline ;;
   "api repos/"*) answer self ;;
+  "project list"*) [ ! -f "$STUB/project-list-fails" ] || { echo "missing scope: project" >&2; exit 1; }; answer projects ;;
+  "project item-add"*) [ ! -f "$STUB/item-add-fails" ] || { echo "could not resolve to a node with the global id" >&2; exit 1; } ;;
+  "project item-edit"*) [ ! -f "$STUB/item-edit-fails" ] || { echo "option 'Complete' not found for field 'Status'" >&2; exit 1; } ;;
+  "--version") answer version ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 1 ;;
 esac
 EOF
@@ -42,6 +46,7 @@ chmod +x "$SP/stubbin/gh"
 export PATH="$SP/stubbin:$PATH" STUB=$SP/stub STUB_LOG=$SP/stub.log
 stub() { printf '%s\n' "$2" > "$STUB/$1"; }   # stub <file> <content>
 nostub() { rm -f "$STUB/$1"; }
+stub version "gh version 2.98.0 (2026-08-20)"   # new enough for project-status
 # an issue body: lines joined by \037, as fr.sh's jq prints them
 body() { local IFS=$'\037'; printf '%s' "$*"; }
 
@@ -257,6 +262,56 @@ check "R2 branch doc overrides the issue row" '"$FR" list --no-fetch 2>/dev/null
 stub meta "$(printf 'OPEN\tfr\tFrom the request repo')"; : > "$STUB_LOG"
 "$FR" spec r2-47 >/dev/null 2>&1
 check "spec r2-47 reads acme/requests#47" 'grep -q "issue view 47 -R acme/requests" "$STUB_LOG"' "$(cat "$STUB_LOG")"
+
+# --- project-status: the board column from project_status, best effort
+: > "$STUB_LOG"
+"$FR" project-status 47 running > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: not configured is a no-op, exit 0" '[ "$rc" = 0 ] && grep -q "not configured" "$SP/ps.out" && ! grep -q "^project" "$STUB_LOG"' "exit $rc: $(cat "$SP/ps.out")"
+printf -- '---\nfr_prefix: R2\nissue_repo: Acme/Requests\nproject: Shop roadmap\nproject_status: "defined=Ready, running=Running, input=Waiting for Input, done=Complete"\n---\n' > .claude/workflow.md
+stub projects "$(printf '3\tShop roadmap\n7\tOther board')"
+: > "$STUB_LOG"
+"$FR" project-status 47 input > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: resolves project by title, adds the issue, then one edit, value with spaces" '[ "$rc" = 0 ] && grep -qx "project item-add 3 --owner acme --url https://github.com/acme/requests/issues/47" "$STUB_LOG" && grep -qx "project item-edit 3 --owner acme --url https://github.com/acme/requests/issues/47 --field Status --value Waiting for Input" "$STUB_LOG" && [ "$(grep -c "^project item-" "$STUB_LOG")" = 2 ]' "exit $rc: $(cat "$SP/ps.out" "$STUB_LOG")"
+check "project-status: reports what it wrote" 'grep -q "acme/requests#47 → Waiting for Input (Shop roadmap)" "$SP/ps.out"' "$(cat "$SP/ps.out")"
+: > "$STUB_LOG"
+"$FR" project-status R2-47 failed > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: event without a value writes nothing, exit 0" '[ "$rc" = 0 ] && ! grep -q "item-" "$STUB_LOG" && grep -q "no value for" "$SP/ps.out"' "exit $rc: $(cat "$SP/ps.out")"
+"$FR" project-status 47 shipped > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: unknown event is a usage error" '[ "$rc" = 1 ] && grep -q "unknown event" "$SP/ps.out"' "exit $rc: $(cat "$SP/ps.out")"
+"$FR" project-status 47 > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: missing event is a usage error" '[ "$rc" = 1 ]' "exit $rc"
+stub item-edit-fails ""; : > "$STUB_LOG"
+"$FR" project-status 47 done > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: value the board does not know → exit 5 with gh's reason" '[ "$rc" = 5 ] && grep -q "not written for acme/requests#47 — option .Complete. not found" "$SP/ps.out" && [ "$(grep -c "^project item-" "$STUB_LOG")" = 2 ]' "exit $rc: $(cat "$SP/ps.out" "$STUB_LOG")"
+nostub item-edit-fails
+stub item-add-fails ""; : > "$STUB_LOG"
+"$FR" project-status 47 done > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: issue cannot be added → exit 5 with gh's reason, no edit" '[ "$rc" = 5 ] && grep -q "cannot add acme/requests#47 to .Shop roadmap. — could not resolve" "$SP/ps.out" && ! grep -q "item-edit" "$STUB_LOG"' "exit $rc: $(cat "$SP/ps.out" "$STUB_LOG")"
+nostub item-add-fails
+stub version "gh version 2.95.0 (2026-01-01)"; : > "$STUB_LOG"
+"$FR" project-status 47 done > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: gh older than 2.97 → exit 5, says so, nothing called" '[ "$rc" = 5 ] && grep -q "gh 2.95.0 is older than 2.97" "$SP/ps.out" && ! grep -q "^project" "$STUB_LOG"' "exit $rc: $(cat "$SP/ps.out" "$STUB_LOG")"
+"$FR" check > "$SP/check.out" 2>&1
+check "check: gh older than 2.97 with project_status → NOT written" 'grep -q "status column: Status, NOT written — gh 2.95.0 is older than 2.97" "$SP/check.out"' "$(cat "$SP/check.out")"
+stub version "gh version 2.98.0 (2026-08-20)"
+printf -- '---\nfr_prefix: R2\nissue_repo: Acme/Requests\nproject: Nope\nproject_status: "done=Complete"\n---\n' > .claude/workflow.md
+"$FR" project-status 47 done > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: unknown project title → exit 5 with reason" '[ "$rc" = 5 ] && grep -q "no project .Nope. under acme" "$SP/ps.out"' "exit $rc: $(cat "$SP/ps.out")"
+stub project-list-fails ""
+"$FR" project-status 47 done > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: no project scope → exit 5, hint to refresh" '[ "$rc" = 5 ] && grep -q "gh auth refresh -s project" "$SP/ps.out"' "exit $rc: $(cat "$SP/ps.out")"
+nostub project-list-fails
+printf -- '---\nfr_prefix: R2\nissue_repo: Acme/Requests\nproject_status: "done=Complete"\n---\n' > .claude/workflow.md
+"$FR" project-status 47 done > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: mapping without project → exit 5" '[ "$rc" = 5 ] && grep -q "project is empty" "$SP/ps.out"' "exit $rc: $(cat "$SP/ps.out")"
+"$FR" check > "$SP/check.out" 2>&1
+check "check: project_status without project → warning line" 'grep -q "project:  NONE — project_status is set but project is empty" "$SP/check.out"' "$(cat "$SP/check.out")"
+printf -- '---\nfr_prefix: R2\nissue_repo: Acme/Requests\nproject: shop ROADMAP\nproject_status_field: Stand\nproject_status: running=Läuft,done = Fertig\n---\n' > .claude/workflow.md
+: > "$STUB_LOG"
+"$FR" project-status 'https://github.com/acme/requests/issues/47' done > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: title regardless of case, own field name, unquoted mapping, spaces around =, URL ref" '[ "$rc" = 0 ] && grep -qx "project item-edit 3 --owner acme --url https://github.com/acme/requests/issues/47 --field Stand --value Fertig" "$STUB_LOG"' "exit $rc: $(cat "$SP/ps.out" "$STUB_LOG")"
+"$FR" check > "$SP/check.out" 2>&1
+check "check shows the project and its status column" 'grep -q "project:  shop ROADMAP   status column: Stand, written by the skills" "$SP/check.out"' "$(cat "$SP/check.out")"
 
 echo "--- $pass passed, $fail failed"
 [ "$fail" = 0 ]

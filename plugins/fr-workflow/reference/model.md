@@ -159,7 +159,34 @@ Every fr-workflow skill reads this first.
 - Requests are closed only by `:done`, only when every FR serving them is closed,
   and only after the user confirmed.
 - A GitHub project (`project` in the profile) gets every FR issue `:new` writes.
-  Moving cards is left to the project's own workflows (*Item closed* → Done, …).
+  Without `project_status` the project's own workflows move the cards (*Item
+  closed* → Done, …); with it the skills write the status column — see *Board
+  status*.
+
+## Board status
+
+GitHub's project workflows know *added* and *closed*; *running*, *waiting* and
+*failed* only the session knows. `project_status` in the profile maps the
+plugin's events to the board's own values (`defined=Ready, running=In progress,
+…`; the column is `project_status_field`, default `Status`); an event without a
+value writes nothing. `fr.sh project-status <issue> <event>`:
+
+| Event      | Written by        | When                                                                                                                             |
+| ---------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `defined`  | `:new`            | the FR issue is written and ready — no open questions                                                                            |
+| `input`    | `:new`, `:ship`   | a skill stops with a question: open questions left on purpose, unclear uncommitted changes, unverified criteria, a login wall    |
+| `running`  | `:start`, `:ship` | branch, worktree and session exist; a resumed FR; `:ship` starts                                                                 |
+| `failed`   | `:ship`           | a gate found a defect in the change: review or security findings under `stop`, a secret, red CI, a failed criterion              |
+| `blocked`  | `:ship`           | something outside the change holds it up: the ship lock, a deployment that does not come, a merge conflict that needs a decision |
+| `approval` | `:ship`           | finished: PR open, acceptance check recorded — the merge is the user's                                                           |
+| `done`     | `:done`           | merged or dropped                                                                                                                |
+
+Best effort by design: exit 5 means *not written*, with the reason — a `gh`
+older than 2.97, no `project` scope on the token, no project of that title
+under the issue repository's owner, no such column value. A skill puts that
+line into its report and goes on: **the board is never a gate.** An FR issue
+not on the board yet is added first. Without `project_status` nothing is
+written.
 
 ## Script
 
@@ -173,6 +200,7 @@ Every fr-workflow skill reads this first.
 | `issue-frs <issue>`                         | the FRs serving a request: `ref state reason via` — `reason` `completed`, `not_planned` or `duplicate` once closed; `via` `self`, `sub` or `requests`                                                                    |
 | `overlap [<ID>...]`                         | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now |
 | `lock acquire\|release\|break\|status <ID>` | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs                                                                                  |
+| `project-status <issue> <event>`            | the board column of an FR issue per `project_status`: `defined`, `input`, `running`, `failed`, `blocked`, `approval`, `done`. Exit 5 = not written, reason on stderr — a line for the report, never a stop               |
 
 `location` is `issue` (not started; `ref` is the issue), `base`, `branch` (then
 `ref` is the branch) or `local` (uncommitted in this checkout). `list` and

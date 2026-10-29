@@ -73,6 +73,14 @@ Also propose:
   ones: `gh project list --owner <owner>`. Optional. Adding issues needs the
   `project` scope on the token (`gh auth status` lists the scopes;
   `gh auth refresh -s project` adds it).
+- `project_status`, with a project: whether its status column should follow the
+  FRs. `gh project field-list <number> --owner <owner> --format json` shows the
+  column (usually `Status`) and its options. Propose a mapping of the plugin's
+  events — `defined`, `running`, `input`, `failed`, `blocked`, `approval`,
+  `done` — onto those options, e.g.
+  `defined=Todo, running=In Progress, approval=In Review, done=Done`, leaving
+  out events the board has no value for. Needs `gh` 2.97 or newer wherever the
+  commands run. Without the key GitHub's own workflows move the cards.
 
 Show the proposed profile and all open questions in one message. Typical ones:
 test environment URL and how to get in, test accounts (names or roles, never
@@ -129,5 +137,7 @@ Do not commit unless the user asks. Report:
   private;
 - with `project`: GitHub's built-in project workflows move the cards — *Item
   closed* → Done is on by default; *Auto-add to project* with the filter
-  `label:fr` also catches FR issues written by hand;
+  `label:fr` also catches FR issues written by hand. With `project_status` the
+  commands set the column themselves at every start and stop; keep *Item
+  closed* as the safety net;
 - the next step: `/fr-workflow:new` with an idea, or with issues.

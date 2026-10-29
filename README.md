@@ -42,7 +42,9 @@ flowchart LR
 - **What GitHub has, not own bookkeeping.** An FR's id is its issue number;
   requests and FRs are linked with sub-issues and mentions; `Closes` closes the
   FR issue, `Refs` links the requests. `done` closes a request when all its FRs
-  are closed — never a request on the first merge.
+  are closed — never a request on the first merge. The project board is the one
+  place the plugin writes state GitHub cannot derive: with `project_status` the
+  commands set its status column at every start and stop.
 - **No shared index file.** A table edited in every PR conflicts and drifts;
   `status` derives the overview.
 - **`merged` is derived, not written** — nothing needs to be committed to a
@@ -74,7 +76,7 @@ plugins/fr-workflow/
   skills/<command>/SKILL.md         one folder per command
   agents/                           reviewer agents for ship, adapted from pr-review-toolkit (Apache-2.0)
   reference/model.md                model and rules, read by every command
-  scripts/fr.sh                     deterministic part: FR list, FR doc from the issue, FRs of a request, overlap, lock
+  scripts/fr.sh                     deterministic part: FR list, FR doc from the issue, FRs of a request, overlap, lock, board status
   templates/                        FR issue, profile, issue form, FR folder README
 docs/                               user documentation
 tests/fr-sh.sh                      regression suite for scripts/fr.sh

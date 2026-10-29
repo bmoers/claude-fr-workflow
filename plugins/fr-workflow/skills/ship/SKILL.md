@@ -28,6 +28,16 @@ it; held longer than 120 min, or reported stale → ask the user, and only on th
 word `fr.sh lock break`. Release with `fr.sh lock release <ID>` at the end of
 step 6 — and **before stopping at any gate**, so other FRs are not blocked.
 
+**Board status** (`project_status` in the profile; `<issue>` is the FR doc's
+`issue`): `fr.sh project-status <issue> running` once step 0 passed. Whenever
+this skill **stops** before step 7, write why, in the same breath as the
+evidence: `failed` when a gate found a defect in the change — review or
+security findings under `stop`, a secret, red CI, a failed criterion; `blocked`
+when something outside the change holds it up — the lock, a deployment that
+does not come, a merge conflict that needs a decision; `input` when it stops
+with a question — unclear uncommitted changes, unverified criteria, a login
+wall. Exit 5 (not written) is a line in the report, never a reason to stop.
+
 ## 0. Preflight
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh check` passes; the current branch is not
@@ -219,6 +229,7 @@ Only when no criterion failed, and the user accepted any unverified ones:
   it there: "Ready for acceptance on <test env URL> — <ID> <title>, PR <repo>#<N>."
   The FR's body stays as it was at the start; the result lives in the FR doc and
   the PR.
+- `fr.sh project-status <issue> approval` — the merge is the user's.
 - Report in one block: PR link · CI · deployment · acceptance check per criterion
-  · review findings accepted or reported · what is left: the merge (the user's),
-  then `/fr-workflow:done <ID>`.
+  · review findings accepted or reported · the board status, or why it was not
+  written · what is left: the merge (the user's), then `/fr-workflow:done <ID>`.

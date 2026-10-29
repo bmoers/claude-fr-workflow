@@ -59,6 +59,13 @@ FR issue — define them again with `/fr-workflow:new`.
   Invariants of new or reshaped data types go into *Technical notes*.
 - `init` creates the labels `fr-request` and `fr` (after asking) and proposes a
   GitHub project.
+- **Board status from the commands:** with `project_status` in the profile
+  (`defined=Ready, running=In progress, …`) `new`, `start`, `ship` and `done`
+  set the project's status column at every start and stop —
+  `fr.sh project-status <issue> <event>`, best effort: a board that cannot be
+  written is a line in the report, never a stop. Without the key GitHub's
+  workflows move the cards, as before
+  ([profile](docs/profile.md#board-status)).
 
 ### Fixed
 
@@ -70,8 +77,9 @@ FR issue — define them again with `/fr-workflow:new`.
 - Create the label `fr` in the issue repository
   (`gh label create fr -R <repo>`), or run `/fr-workflow:init` again.
 - Remove `backlinks` and `id_digits` from the profile; add `project` if the FR
-  issues should go into a GitHub project (`gh auth refresh -s project` on every
-  machine that runs `new`).
+  issues should go into a GitHub project, and `project_status` if its status
+  column should follow the FRs (`gh auth refresh -s project` and `gh` 2.97 or
+  newer on every machine that runs the commands).
 - Old backlink comments on issues are no longer updated; delete them if they
   confuse.
 

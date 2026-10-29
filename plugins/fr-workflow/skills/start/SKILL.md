@@ -67,6 +67,9 @@ once the conflicting FR is merged — or now, if the user accepts the overlap.
    or personal data, and run the profile's secret scan on the commit if there is
    one. Then `git push -u origin <branch>` — the branch holds nothing but the FR
    doc.
+5. `fr.sh project-status <issue> running` — the board column, when the profile
+   maps it (`project_status`). Exit 5 (not written) is a line in the report,
+   never a stop.
 
 **Resume:**
 
@@ -79,6 +82,8 @@ once the conflicting FR is merged — or now, if the user accepts the overlap.
    force.
 3. Change nothing, push nothing — the worktree may hold unreviewed local commits,
    and a push to a branch with an open PR can deploy.
+4. `fr.sh project-status <issue> running` — a resumed FR is running again; the
+   board column is not a git change.
 
 Model and effort: the FR doc's `model` and `effort`, else the profile's
 `impl_model` and `impl_effort`, else `opus` and `high`.

@@ -22,6 +22,9 @@
 #                                  start alongside the in-progress ones: waves
 #   fr.sh lock acquire|release|break|status [<ID>]
 #                                  ship lock for a shared test environment
+#   fr.sh project-status <issue> <event>
+#                                  the FR's status column in the GitHub project,
+#                                  per project_status; exit 5 if not written
 #
 # Issue refs: owner/repo#12, #12, 12 or FR-12 (issue repo), a GitHub issue URL.
 
@@ -635,8 +638,75 @@ cmd_lock() {
   esac
 }
 
+# The status column of the GitHub project (`project` in the profile) for an
+# FR issue. `project_status` maps the plugin's events to the project's own
+# values ("defined=Ready, running=In progress, …"); an event without a value
+# writes nothing. The project belongs to the owner of the issue repository —
+# the same place `gh issue create --project` looks, and like it the title is
+# matched regardless of case. The issue is added to the project first —
+# idempotent, GitHub returns the existing item — so FR issues written by hand
+# or without the project scope land on the board too; then one edit, by names
+# (--url --field --value), which gh has since 2.97. Best effort by design: the
+# board never stops a skill — exit 5 when the status could not be written, the
+# reason on stderr, and the skill mentions it in its report.
+PS_EVENTS='defined input running failed blocked approval done'
+GH_MIN=2.97
+
+gh_version() { gh --version 2>/dev/null | awk 'NR == 1 { print $3 }' || true; }
+
+# gh_older_than <major.minor> <version>: true when the version is older. A
+# version that does not start with a number (DEV builds) counts as new enough.
+gh_older_than() {
+  printf '%s\n' "$2" | awk -F. -v min="$1" '
+    BEGIN { split(min, m, "."); old = 1 }
+    $1 ~ /^[0-9]+$/ { old = ($1 + 0 < m[1] + 0 || ($1 + 0 == m[1] + 0 && $2 + 0 < m[2] + 0)) ? 0 : 1 }
+    END { exit old }'
+}
+
+cmd_project_status() {
+  [ $# -eq 2 ] || die "usage: fr.sh project-status <issue> <event>"
+  local ref event="$2" map title field owner url value out num ver
+  case " $PS_EVENTS " in
+    *" $event "*) ;;
+    *) die "unknown event '$event' — one of: $PS_EVENTS" ;;
+  esac
+  ref=$(issue_ref "$1")
+  map=$(cfg project_status "")
+  if [ -z "$map" ]; then echo "project status: not configured (no project_status in the profile)"; return 0; fi
+  title=$(cfg project "")
+  if [ -z "$title" ]; then echo "fr.sh: project_status is set but project is empty — status not written" >&2; exit 5; fi
+  # "k=v, k=v": records split at commas, the key before the first "="
+  value=$(printf '%s' "$map" | awk -v e="$event" 'BEGIN { RS = "," }
+    {
+      i = index($0, "="); if (i == 0) next
+      k = substr($0, 1, i - 1); v = substr($0, i + 1)
+      gsub(/^[ \t\n]+|[ \t\n]+$/, "", k); gsub(/^[ \t\n]+|[ \t\n]+$/, "", v)
+      if (k == e) { print v; exit }
+    }')
+  if [ -z "$value" ]; then echo "project status: no value for '$event' in project_status — nothing written"; return 0; fi
+  if ! command -v gh >/dev/null; then echo "fr.sh: gh not found — project status not written" >&2; exit 5; fi
+  ver=$(gh_version)
+  if gh_older_than "$GH_MIN" "$ver"; then echo "fr.sh: gh $ver is older than $GH_MIN — project status not written; upgrade gh" >&2; exit 5; fi
+  field=$(cfg project_status_field Status)
+  owner=${ref%%/*}
+  url="https://github.com/${ref%%#*}/issues/${ref##*#}"
+  if ! out=$(gh project list --owner "$owner" --limit 100 --format json \
+        --jq '.projects[] | [(.number | tostring), .title] | join("\t")' 2>&1); then
+    echo "fr.sh: cannot list the projects of $owner — $out (gh auth refresh -s project?)" >&2; exit 5
+  fi
+  num=$(printf '%s\n' "$out" | awk -F '\t' -v t="$title" 'tolower($2) == tolower(t) { print $1; exit }')
+  if [ -z "$num" ]; then echo "fr.sh: no project '$title' under $owner — status not written" >&2; exit 5; fi
+  if ! out=$(gh project item-add "$num" --owner "$owner" --url "$url" 2>&1); then
+    echo "fr.sh: cannot add $ref to '$title' — $out" >&2; exit 5
+  fi
+  if ! out=$(gh project item-edit "$num" --owner "$owner" --url "$url" --field "$field" --value "$value" 2>&1); then
+    echo "fr.sh: project status not written for $ref — $out" >&2; exit 5
+  fi
+  echo "project status: $ref → $value ($title)"
+}
+
 cmd_check() {
-  local ok=1 repo
+  local ok=1 repo project ver note
   # cur_repo exits its subshell on failure, so test the assignment itself
   if repo=$(cur_repo 2>/dev/null) && [ -n "$repo" ]; then
     echo "repo:     $repo"
@@ -646,6 +716,21 @@ cmd_check() {
   if [ -f "$PROFILE" ]; then echo "profile:  $PROFILE"; else echo "profile:  MISSING ($PROFILE) — run /fr-workflow:init"; ok=0; fi
   echo "issues:   $(cfg issue_repo "${repo:-?}")"
   echo "fr_dir:   $FR_DIR   prefix: $PREFIX   base: $BASE"
+  project=$(cfg project "")
+  if [ -n "$project" ]; then
+    if [ -n "$(cfg project_status "")" ]; then
+      note="written by the skills"
+      if command -v gh >/dev/null; then
+        ver=$(gh_version)
+        if gh_older_than "$GH_MIN" "$ver"; then note="NOT written — gh $ver is older than $GH_MIN, upgrade gh"; fi
+      fi
+      echo "project:  $project   status column: $(cfg project_status_field Status), $note"
+    else
+      echo "project:  $project   status column: left to GitHub's workflows"
+    fi
+  elif [ -n "$(cfg project_status "")" ]; then
+    echo "project:  NONE — project_status is set but project is empty, the status is not written"
+  fi
   if command -v gh >/dev/null; then
     if gh auth status >/dev/null 2>&1; then echo "gh:       ok"; else echo "gh:       NOT LOGGED IN — gh auth login"; ok=0; fi
   else
@@ -662,5 +747,6 @@ case "$cmd" in
   issue-frs) cmd_issue_frs "$@" ;;
   overlap) cmd_overlap "$@" ;;
   lock) cmd_lock "$@" ;;
-  *) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  project-status) cmd_project_status "$@" ;;
+  *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

@@ -11,8 +11,8 @@ pitfalls that the code does not show.
   built-ins (`/code-review`, `/security-review`, worktrees, `claude agents`,
   `--bg`) over GitHub features (issue forms) over own code. Own code only where
   nothing equivalent exists — here `scripts/fr.sh` (FR list, FR doc from the
-  issue, the FRs of a request, overlap, lock), the skill texts and the two review
-  agents.
+  issue, the FRs of a request, overlap, lock, board status), the skill texts and
+  the two review agents.
 - **Projects only get better, never worse.** Client repositories pin a tag. A
   change is released as a new tag, tested in the sandbox, and only then does a
   client's pin go up. Never move a pushed tag.
@@ -31,6 +31,13 @@ pitfalls that the code does not show.
 - The FR id is the issue number. Requests and FRs are linked with what GitHub
   has: sub-issues, and the *Requests* line of the FR's Planning, found back
   through the request's timeline (`fr.sh issue-frs`) — no own bookkeeping.
+- The board is written, not derived, when a project asks for it (0.5): GitHub's
+  workflows know *added* and *closed*, not *running*, *waiting*, *blocked* or
+  *failed*. `project_status` maps the plugin's seven events to the project's own
+  column values; `fr.sh project-status` writes them best effort (exit 5 = not
+  written) with gh's name-based `item-edit` (gh ≥ 2.97; the node-id form needs
+  three lookups more), no skill ever stops for the board, and without the key
+  nothing is written.
 - PRs say `Closes` for the FR's own issue and `Refs` for its requests; `done`
   closes a request only when all its FRs are closed, and only after
   confirmation.
@@ -116,7 +123,7 @@ a new session there.
   · 0.3 security review in `ship`, nothing pushed unreviewed · 0.4 issue form and
   `/fr-workflow:idea` · 0.5 the issue is the spec until the start (local or
   GitHub first, sub-issues, project; `idea` and `sync` gone), review agents in
-  `ship`, failure behaviour. Details: [CHANGELOG.md](CHANGELOG.md).
+  `ship`, failure behaviour, board status. Details: [CHANGELOG.md](CHANGELOG.md).
 - Before 0.3.0, three `/code-review` rounds found 37, 23 and 19 issues. Recurring
   bug classes: `set -e` exit codes, git path quoting, ref normalization, branch
   name rules, unpushed local commits, the order of secret removal. 0.3.1 came

@@ -24,6 +24,8 @@ tokens.
 | `branch_pattern`        | `{type}/{id-lower}-{slug}`                                    | FR branch names, e.g. `feat/fr-47-coupon-field`. Placeholders: `{type}` (`feat`, `fix`, …), `{id-lower}` (`fr-47`), `{slug}` (short title). Must contain `{id-lower}`                                                                                                                                                                                           |
 | `issue_repo`            | this repository                                               | `owner/repo` where requests and FR issues live, if not here. Whoever reads them reads the FR specs                                                                                                                                                                                                                                                              |
 | `project`               | —                                                             | title of a GitHub project: `new` adds every FR issue to it. Needs the `project` scope on the `gh` token (`gh auth refresh -s project`)                                                                                                                                                                                                                          |
+| `project_status_field`  | `Status`                                                      | the project's single-select status column that `project_status` writes                                                                                                                                                                                                                                                                                          |
+| `project_status`        | —                                                             | `event=value` pairs, comma-separated: the column value each plugin event sets — `defined`, `running`, `input`, `failed`, `blocked`, `approval`, `done`; events left out write nothing. Empty = the project's own workflows move the cards. See [board status](#board-status)                                                                                    |
 | `notify_issues`         | `ask`                                                         | "ready for acceptance" comment on the FR issue and its requests after a successful ship: `never`, `ask`, `always`                                                                                                                                                                                                                                               |
 | `review_gate`           | `stop`                                                        | code review findings `stop` the ship, or are only collected for the `report`                                                                                                                                                                                                                                                                                    |
 | `security_gate`         | `stop`                                                        | the same for security review findings — set separately, so style findings can be `report` while security findings still stop. **Secrets always stop**, whatever this says. Missing in an older profile → `stop`                                                                                                                                                 |
@@ -83,6 +85,38 @@ review_agents: []
 
 Or keep only some: `review_agents: [type-design-analyzer]`.
 
+## Board status
+
+A GitHub project knows when an item was added and when it was closed. What a
+Claude session is doing — running, waiting for you, blocked, failed — only the
+commands know. With `project_status` they write it into the board's status
+column at every start and stop:
+
+```yaml
+project: Shop roadmap
+project_status_field: Status
+project_status: "defined=Ready, running=Running, input=Waiting for Input, failed=Failed, blocked=Blocked, approval=Waiting for Approval, done=Complete"
+```
+
+| Event      | Set when                                                                                                    |
+| ---------- | ----------------------------------------------------------------------------------------------------------- |
+| `defined`  | `new` wrote the FR issue and nothing is open                                                                |
+| `input`    | a command stops with a question for you: open questions, unclear changes, unverified criteria, a login wall |
+| `running`  | `start` created branch, worktree and session; `ship` starts or starts again                                 |
+| `failed`   | a gate found a defect: review or security findings, a secret, red CI, a failed acceptance criterion         |
+| `blocked`  | something outside the change: the shared-environment lock, a missing deployment, a conflict to decide       |
+| `approval` | `ship` finished — the PR waits for your merge                                                               |
+| `done`     | `done` closed it, merged or dropped                                                                         |
+
+The values are the board's own option names — map only the events you have a
+value for. Writing the board is best effort: a `gh` older than 2.97, a missing
+`project` scope (`gh auth refresh -s project`), a title that does not match
+(`gh project list --owner <owner>`; case does not matter) or an unknown value
+is reported by the command and never stops it. The project must belong to the
+owner of the issue repository — the organisation or user — like
+`gh issue create --project`. Keep GitHub's *Item closed* workflow on as the
+safety net for issues closed by hand.
+
 ## Prose sections
 
 | Section                         | What to write                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -104,6 +138,7 @@ fr_prefix: FR
 branch_pattern: "{type}/{id-lower}-{slug}"
 issue_repo: acme/shop-requests
 project: Shop roadmap
+project_status: "defined=Todo, running=In Progress, approval=In Review, done=Done"
 notify_issues: always
 review_gate: report
 security_gate: stop

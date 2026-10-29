@@ -5,6 +5,8 @@ fr_prefix: FR                     # FR-47 = issue #47
 branch_pattern: "{type}/{id-lower}-{slug}"
 issue_repo:                       # owner/repo of requests and FR issues; empty = this repository
 project:                          # GitHub project (title) for the FR issues; empty = none
+project_status_field: Status      # the project's single-select status column
+project_status:                   # plugin events -> its values, e.g. "defined=Ready, running=In progress, approval=In review, done=Done"; empty = GitHub's workflows move the cards
 notify_issues: ask                # never | ask | always — "ready for acceptance" comment
 review_gate: stop                 # stop | report — what :ship does on code review findings
 security_gate: stop               # stop | report — what :ship does on security review findings
