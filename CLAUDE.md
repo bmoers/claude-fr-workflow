@@ -38,6 +38,9 @@ pitfalls that the code does not show.
   written) with gh's name-based `item-edit` (gh ≥ 2.97; the node-id form needs
   three lookups more), no skill ever stops for the board, and without the key
   nothing is written.
+- What the skills write to GitHub is in the language of its source — the idea,
+  the file, the request — never switched to English (0.5.1); the plugin's own
+  files stay English.
 - PRs say `Closes` for the FR's own issue and `Refs` for its requests; `done`
   closes a request only when all its FRs are closed, and only after
   confirmation.

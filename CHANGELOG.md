@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Language of what goes to GitHub:** FR issues, comments and PR descriptions
+  are written in the language of their source — the idea, the draft file, the
+  request — never switched to English. Headings and Planning keys stay English.
+
 ## [0.5.0] — 2026-10-29
 
 **Breaking:** the issue is the spec until the start. FR docs written by earlier

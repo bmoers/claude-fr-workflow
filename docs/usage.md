@@ -335,5 +335,7 @@ for acceptance" note. FR issues live in the same repository as the requests
 
 - GitHub and GitHub Actions only. Jira is not supported.
 - Requests and FR issues live in one repository (`issue_repo`).
-- The headings of an FR issue and its *Planning* keys must stay in English; the
-  text may be in any language.
+- The headings of an FR issue and its *Planning* keys must stay in English.
+  Everything else the commands write to GitHub — issue text, comments, PR
+  descriptions — follows the language of its source: the idea, the file, the
+  request. The generated preamble of the FR doc stays English.

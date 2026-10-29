@@ -116,7 +116,8 @@ wall. Exit 5 (not written) is a line in the report, never a reason to stop.
 - Push the branch.
 - PR: the open PR from step 0, else `gh pr create --base <base_branch>`:
   - title per the profile (it often becomes the squash-merge title);
-  - body: link to the FR doc on the branch, a short summary, `Closes <issue>` for
+  - body, in the FR's language (*Language* in the model): link to the FR doc on
+    the branch, a short summary, `Closes <issue>` for
     the FR's own issue (`issue` in the frontmatter) and `Refs <request>` for each
     of its `requests` — **never** `Closes`/`Fixes` for a request — the acceptance
     criteria as the test plan, and *Review notes* (step 1.6) if there are any;
@@ -227,6 +228,7 @@ Only when no criterion failed, and the user accepted any unverified ones:
 - `notify_issues`: `never` → nothing; `ask` → offer it; `always` → post. One new
   comment on the FR's issue and on each of its `requests` — their watchers learn
   it there: "Ready for acceptance on <test env URL> — <ID> <title>, PR <repo>#<N>."
+  — in the issue's language, the text is a template (*Language* in the model).
   The FR's body stays as it was at the start; the result lives in the FR doc and
   the PR.
 - `fr.sh project-status <issue> approval` — the merge is the user's.

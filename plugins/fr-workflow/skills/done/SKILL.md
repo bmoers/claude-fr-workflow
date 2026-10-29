@@ -71,7 +71,9 @@ by `drop`.
        (`gh issue close <n> -R <repo> --reason "not planned"`) — the user's call;
      - any FR still open → keep the request open; name the open FRs.
 
-   Comments are read by the customer: no internals, no personal data.
+   Comments are read by the customer: no internals, no personal data, and in
+   the issue's language — the texts above are templates (*Language* in the
+   model).
 2. Clean up, each step only if it is safe:
    - A Claude session still running in the FR's worktree? Check
      `claude agents --json` (match `cwd` to the worktree path, or `name` starting

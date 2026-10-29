@@ -112,10 +112,11 @@ code you read.
 1. **Body** from `${CLAUDE_PLUGIN_ROOT}/templates/fr.md`, every section filled;
    *Open questions* says `None.` unless the user left one open on purpose. Keep
    the headings and the Planning keys in English — `fr.sh` reads them; write the
-   text in the language of the issues. Check it against the hard rules before it
-   goes out: no credentials, no personal or customer data — requests often hold
-   pasted logs: describe instead of copying. Write it to a temporary file outside
-   the repository.
+   text in the language of the source — the idea, the file, the request — never
+   in English just because this skill is (*Language* in the model). Check it
+   against the hard rules before it goes out: no credentials, no personal or
+   customer data — requests often hold pasted logs: describe instead of copying.
+   Write it to a temporary file outside the repository.
 2. **Labels** `fr` and `fr-request` must exist in `<repo>`
    (`gh label list -R <repo> --search fr --json name`). Missing → say so, and
    create one only if the user agrees:
@@ -138,7 +139,8 @@ code you read.
    something under *Open questions*. Exit 5 (not written) is a line in the
    report, never a stop.
 5. **Notes to authors**, only on issues the current user
-   (`gh api user -q .login`) did not open:
+   (`gh api user -q .login`) did not open — in the issue's language; the texts
+   below are templates (*Language* in the model):
    - rewritten → `gh issue comment <n> -R <repo> --body "Worked out into a feature request — see the description. Your original text is kept at its end."`;
    - split or joined → on the request: "Planned as #48, #49." with the FR issues
      that serve it.

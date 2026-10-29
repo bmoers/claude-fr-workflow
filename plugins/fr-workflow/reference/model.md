@@ -73,8 +73,12 @@ Every fr-workflow skill reads this first.
     read. `:start` checks what changed in the areas since.
   - **Requests:** the request issues this FR serves; empty when the FR is the
     request itself.
-- Headings and Planning keys stay English — `fr.sh` reads them. The text may be
-  in any language.
+- **Language:** what the skills write to GitHub — FR issue titles and bodies,
+  comments, PR descriptions — is in the language of its source: the idea, the
+  draft file, the request issue. Never switch to English or any other language
+  on your own; the quoted comment texts in the skills are templates to render in
+  that language. Only the headings and the Planning keys stay English — `fr.sh`
+  reads them. Sources in different languages → ask.
 - **Ready to start:** open, label `fr`, at least one acceptance criterion, no
   items under *Open questions*. `fr.sh spec` refuses anything else.
 
