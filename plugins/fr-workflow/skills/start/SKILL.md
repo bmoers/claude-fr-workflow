@@ -67,7 +67,15 @@ once the conflicting FR is merged — or now, if the user accepts the overlap.
    or personal data, and run the profile's secret scan on the commit if there is
    one. Then `git push -u origin <branch>` — the branch holds nothing but the FR
    doc.
-5. `fr.sh project-status <issue> running` — the board column, when the profile
+5. `fr.sh hook setup <ID> .claude/worktrees/<id-lower>-<slug>` — the profile's
+   `worktree_setup`, when it has one (*Worktree hooks* in the model): a dev
+   stack for this worktree, dependencies, an `.env`. Exit 6 → the hook failed:
+   show its output, leave branch and worktree as they are,
+   `fr.sh project-status <issue> blocked`, and this FR is finished for this
+   run — skip step 6 and section 5 for it (`blocked` must stay on the board);
+   the user decides, and `/fr-workflow:start <ID>` resumes it and runs the hook
+   again. Keep the hook's last lines for the hand-over.
+6. `fr.sh project-status <issue> running` — the board column, when the profile
    maps it (`project_status`). Exit 5 (not written) is a line in the report,
    never a stop.
 
@@ -82,7 +90,11 @@ once the conflicting FR is merged — or now, if the user accepts the overlap.
    force.
 3. Change nothing, push nothing — the worktree may hold unreviewed local commits,
    and a push to a branch with an open PR can deploy.
-4. `fr.sh project-status <issue> running` — a resumed FR is running again; the
+4. `fr.sh hook setup <ID> <worktree path>` — `worktree_setup` runs on a resume
+   too, whether the worktree is new or was there (idempotent by contract: a
+   stack that is up stays up, one gone after a reboot comes back). Exit 6 → as
+   above: output, `blocked`, and skip step 5 and section 5 for this FR.
+5. `fr.sh project-status <issue> running` — a resumed FR is running again; the
    board column is not a git change.
 
 Model and effort: the FR doc's `model` and `effort`, else the profile's
@@ -90,6 +102,9 @@ Model and effort: the FR doc's `model` and `effort`, else the profile's
 the profile's `ship_model` and `ship_effort`, else `opus` and `high`.
 
 ## 5. Start the sessions
+
+Only for FRs that passed step 4 — one whose worktree hook failed waits for the
+user, with the hook's output in the hand-over.
 
 - **One FR** → give the user two things for a fresh terminal, from the main
   checkout: the command that opens the worktree session,
@@ -132,7 +147,9 @@ background session:
 ## 6. Hand over
 
 Report per FR: worktree, model and effort, session name, whether the code had
-moved since the definition, and the ship session's command for later —
+moved since the definition, the last lines `worktree_setup` printed when the
+profile has one (a stack's URL, its ports), and the ship session's command for
+later —
 `claude -w <id-lower>-<slug> --model <ship_model> --effort <ship_effort> -n '<ID> ship'`
 (`implement` prints it again at its end); for one FR also the command above and
 `/fr-workflow:implement`. Then how to follow them:

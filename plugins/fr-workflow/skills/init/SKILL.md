@@ -33,6 +33,10 @@ Derive what you can from the repository; ask only for what you cannot.
   services outside Actions that build every branch (Vercel, Netlify branch
   deploys) — their ignore settings are the project's call. Record the outcome in
   the profile's *CI* section.
+- A dev stack the repository runs locally (`compose.yml`, `docker-compose*.yml`,
+  a `scripts/dev.sh`, an `.env.example`): every FR gets its own worktree, and a
+  worktree may need its own stack, dependencies or `.env` to be tested — see
+  *Worktree hooks* in the model. Note which files such a setup generates.
 - Conventions: `commitlint.config.*`, husky hooks, PR-title lint, `CONTRIBUTING.md`.
 - Fast local checks: `package.json` scripts, `Makefile`, `pyproject.toml`.
 - Security tooling the repository already uses: dependency audit (`npm audit`,
@@ -60,6 +64,11 @@ Fill `${CLAUDE_PLUGIN_ROOT}/templates/workflow.md` with your findings. Pick
 Also propose:
 
 - `test_env`: `per-pr` when every PR gets its own preview; otherwise `shared`.
+- `worktree_setup` / `worktree_teardown`: when every FR worktree needs more
+  than the checkout — a dev stack per worktree, dependencies, an `.env` — the
+  project's own commands, idempotent and non-interactive, with `FR_ID`,
+  `FR_NUMBER`, `FR_BRANCH` and `FR_WORKTREE` to derive names and ports from.
+  Otherwise leave both empty. Ask which files they generate, for `.gitignore`.
 - `shared_paths`: what every change tends to touch — lockfiles, a migrations
   folder, translation files, a central route or DI registry. Look at which files
   appear in many recent merged PRs (`git log --name-only` on the base branch).
@@ -101,7 +110,13 @@ point to the `CLAUDE.md` sections instead of copying them.
 - `.claude/workflow.md` — the profile.
 - `<fr_dir>/README.md` from `${CLAUDE_PLUGIN_ROOT}/templates/fr-readme.md`. If a
   README exists there, propose a short section instead.
-- `.gitignore`: make sure `.claude/worktrees/` and `.playwright-mcp/` are listed.
+- `.gitignore`: make sure `.claude/worktrees/` and `.playwright-mcp/` are listed,
+  and whatever the worktree hooks generate (compose overrides, `.env` files,
+  data directories) — ignored files never block `git worktree remove`.
+- `.dockerignore`, when the repository has a `Dockerfile` or a compose file:
+  propose `.claude/` — worktrees live inside the repository, and a `COPY . .`
+  would copy every one of them into the image. The same for the ignore list of
+  file watchers that watch the whole repository.
 - `.github/ISSUE_TEMPLATE/feature-request.yml` from
   `${CLAUDE_PLUGIN_ROOT}/templates/issue-form.yml` — the shape of a request, as
   `/fr-workflow:new` reads it. Existing issue templates stay; if one already serves feature requests, propose adding the

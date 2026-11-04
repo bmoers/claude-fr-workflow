@@ -7,7 +7,8 @@ version — this page explains every part of it.
 The file has two parts:
 
 - **Frontmatter** between the `---` lines: settings, one `key: value` per line.
-  Text after ` #` is a comment. Quotes are optional.
+  Text after ` #` is a comment. Quotes are optional; a value that contains ` #`
+  itself goes in double quotes, the comment then starts after the closing quote.
 - **Prose sections** below: facts Claude reads before it acts — conventions,
   checks, the test environment, extra rules.
 
@@ -41,9 +42,11 @@ tokens.
 | `impl_model`            | `opus`                                                        | default model of implementation sessions; an FR can set its own *Model*                                                                                                                                                                                                                                                                                         |
 | `impl_effort`           | `high`                                                        | default effort: `low`, `medium`, `high`, `xhigh`, `max`; an FR can set its own *Effort*                                                                                                                                                                                                                                                                         |
 | `size_models`           | `"S=sonnet/low, M=sonnet/medium, L=opus/high, XL=opus/xhigh"` | how the issue form's *Size* becomes model and effort. "Don't know" → `impl_model` / `impl_effort`. Explicit model/effort in the issue win over the size                                                                                                                                                                                                         |
-| `ship_model`            | `opus`                                                        | model of the ship session: its gates and the acceptance check are that session's judgement — see [usage](usage.md#step-2--build-fr-workflowstart-20). The review agents run on `opus` regardless                                                                                                                                                                   |
+| `ship_model`            | `opus`                                                        | model of the ship session: its gates and the acceptance check are that session's judgement — see [usage](usage.md#step-2--build-fr-workflowstart-20). The review agents run on `opus` regardless                                                                                                                                                                |
 | `ship_effort`           | `high`                                                        | effort of the ship session: `low`, `medium`, `high`, `xhigh`, `max`                                                                                                                                                                                                                                                                                             |
 | `shared_paths`          | `[]`                                                          | paths many FRs touch, e.g. `[package-lock.json, db/migrations]`. Two FRs that both change something under one of them never run in parallel                                                                                                                                                                                                                     |
+| `worktree_setup`        | —                                                             | command `start` runs in an FR worktree it created or resumed — a dev stack per worktree, dependencies, an `.env`. Idempotent, non-interactive; `FR_ID`, `FR_NUMBER`, `FR_BRANCH`, `FR_WORKTREE` in its environment. Empty = nothing. See [worktree hooks](#worktree-hooks)                                                                                      |
+| `worktree_teardown`     | —                                                             | command `done` runs before anything removes the worktree, e.g. the stack's `down`. Empty = nothing                                                                                                                                                                                                                                                              |
 
 ## Choosing `deploy_signal`
 
@@ -100,15 +103,15 @@ project_status_field: Status
 project_status: "defined=Ready, running=Running, input=Waiting for Input, failed=Failed, blocked=Blocked, approval=Waiting for Approval, done=Complete"
 ```
 
-| Event      | Set when                                                                                                    |
-| ---------- | ----------------------------------------------------------------------------------------------------------- |
-| `defined`  | `new` wrote the FR issue and nothing is open                                                                |
-| `input`    | a command stops with a question for you: open questions, unclear changes, unverified criteria, a login wall |
-| `running`  | `start` created branch, worktree and session; `ship` starts or starts again                                 |
-| `failed`   | a gate found a defect: review or security findings, a secret, red CI, a failed acceptance criterion         |
-| `blocked`  | something outside the change: the shared-environment lock, a missing deployment, a conflict to decide       |
-| `approval` | `ship` finished — the PR waits for your merge                                                               |
-| `done`     | `done` closed it, merged or dropped                                                                         |
+| Event      | Set when                                                                                                                           |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `defined`  | `new` wrote the FR issue and nothing is open                                                                                       |
+| `input`    | a command stops with a question for you: open questions, unclear changes, unverified criteria, a login wall                        |
+| `running`  | `start` created branch, worktree and session; `ship` starts or starts again                                                        |
+| `failed`   | a gate found a defect: review or security findings, a secret, red CI, a failed acceptance criterion                                |
+| `blocked`  | something outside the change: a worktree hook that failed, the shared-environment lock, a missing deployment, a conflict to decide |
+| `approval` | `ship` finished — the PR waits for your merge                                                                                      |
+| `done`     | `done` closed it, merged or dropped                                                                                                |
 
 The values are the board's own option names — map only the events you have a
 value for. Values the column does not have yet: `fr.sh project-options` (from
@@ -126,6 +129,53 @@ is reported by the command and never stops it. The project must belong to the
 owner of the issue repository — the organisation or user — like
 `gh issue create --project`. Keep GitHub's *Item closed* workflow on as the
 safety net for issues closed by hand.
+
+## Worktree hooks
+
+Every FR gets its own worktree under `.claude/worktrees/`. A project that needs
+more than the checkout there — a dev stack per worktree so FRs are tested in
+parallel, installed dependencies, an `.env` with this worktree's ports — names
+one command for each end of the worktree's life:
+
+```yaml
+worktree_setup: scripts/stack.sh up        # derives project name and ports from FR_NUMBER
+worktree_teardown: scripts/stack.sh down
+```
+
+| Hook                | Runs                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| `worktree_setup`    | in `start`, after the worktree was created or resumed, before the session is handed over      |
+| `worktree_teardown` | in `done`, before anything removes the worktree — `git worktree remove` and `claude rm` alike |
+
+The contract, on both sides:
+
+- The command runs **in the worktree**, through `bash -c`, without stdin, with
+  `FR_ID` (`FR-47`), `FR_NUMBER` (`47`), `FR_BRANCH` and `FR_WORKTREE` (absolute
+  path) in its environment. It is read from the main checkout's profile — the
+  one on your base branch, reviewed like any change — never from the copy on
+  the FR branch. Everything it prints is shown; `start` repeats its
+  last lines in the hand-over, so print what the session needs — the stack's URL,
+  its ports.
+- **Idempotent.** Setup runs on every `start` of the FR, a resume included (after
+  a reboot the stack is gone, the worktree is not); a stack that is up stays up.
+- **A failed hook stops that FR, nothing else.** Non-zero exit → the output is
+  shown, the worktree stays, the FR is `blocked` on the board, the user decides.
+  No retry, no `--force`, no session for that FR. `/fr-workflow:start <ID>`
+  runs the setup again; `done` runs the teardown again.
+- **Ignored files are invisible.** What the hooks generate in the worktree —
+  compose overrides, `.env` files, data directories — goes into `.gitignore`:
+  ignored files are never a question in `ship` and do not stop
+  `git worktree remove`. Generated files that are not ignored do stop it; the
+  teardown removes them.
+- The plugin knows nothing about Docker or anything else the hooks do. A hook
+  runs only at the root of an FR worktree of this clone — never in the main
+  checkout, never for the temporary `_drop-` worktrees of `done … drop`; is the
+  worktree already gone, `done` reports the command for you to run by hand. Text
+  after ` #` in the value is a comment, like everywhere in the frontmatter;
+  quote the command when it contains ` #` itself.
+- Worktrees live inside the repository. `.claude/` belongs in `.dockerignore` —
+  a `COPY . .` would copy every worktree into the image — and in the ignore list
+  of file watchers that watch the whole repository.
 
 ## Prose sections
 

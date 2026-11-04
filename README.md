@@ -77,7 +77,7 @@ plugins/fr-workflow/
   skills/<command>/SKILL.md         one folder per command
   agents/                           reviewer agents for ship, adapted from pr-review-toolkit (Apache-2.0)
   reference/model.md                model and rules, read by every command
-  scripts/fr.sh                     deterministic part: FR list, FR doc from the issue, FRs of a request, overlap, lock, board status
+  scripts/fr.sh                     deterministic part: FR list, FR doc from the issue, FRs of a request, overlap, lock, board status, worktree hooks
   templates/                        FR issue, profile, issue form, FR folder README
 docs/                               user documentation
 tests/fr-sh.sh                      regression suite for scripts/fr.sh

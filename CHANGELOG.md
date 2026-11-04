@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.5.4] — 2026-11-04
+
+### Added
+
+- **Worktree hooks:** `worktree_setup` and `worktree_teardown` in the profile —
+  one command each, for projects that need more than the checkout in every FR
+  worktree (a dev stack per worktree so FRs are tested in parallel, dependencies,
+  an `.env`). `start` runs the setup after it created or resumed a worktree,
+  `done` the teardown before anything removes one, `claude rm` included.
+  `fr.sh hook setup|teardown <ID> <path>` runs them in the worktree, without
+  stdin, with `FR_ID`, `FR_NUMBER`, `FR_BRANCH` and `FR_WORKTREE`; exit 6 = the
+  hook failed — the worktree stays, the FR is `blocked`, the user decides. The
+  setup's last lines go into `start`'s hand-over. The command is read from the
+  main checkout's profile, never from an FR branch's copy. Empty keys = nothing,
+  as before.
+- `fr.sh check` shows the hooks when the profile has them.
+
+### Changed
+
+- `done` tears the worktree down before `claude rm`, which deletes a finished
+  session's worktree too; a stack still running on a removed worktree would keep
+  its ports and volumes.
+- Ignored files (`.gitignore`) are never a question in `ship` and never block
+  `git worktree remove`; `init` proposes `.gitignore` entries for what the hooks
+  generate, and `.claude/` for `.dockerignore`.
+- `blocked` is also written by `start` and `done`, for a worktree hook that
+  failed; `done` then stops before it writes `done`.
+- A double-quoted value in the profile frontmatter may contain ` #` — the
+  comment starts after the closing quote. Before, the value was cut there.
+
 ## [0.5.3] — 2026-10-29
 
 ### Added

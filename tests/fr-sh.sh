@@ -343,5 +343,61 @@ printf -- '---\nfr_prefix: R2\nissue_repo: Acme/Requests\n---\n' > .claude/workf
 "$FR" project-options Ready > "$SP/po.out" 2>&1; rc=$?
 check "project-options: no project in the profile → usage error" '[ "$rc" = 1 ] && grep -q "no project in the profile" "$SP/po.out"' "exit $rc: $(cat "$SP/po.out")"
 
+# --- worktree hooks: environment, failure, guards
+newrepo "$SP/regress-hook" git@github.com:acme/hook.git
+printf '.claude/worktrees/\n' > .gitignore
+printf -- '---\n---\n' > .claude/workflow.md
+git add -A; git commit -qm init; git push -q -u origin main
+branch_fr feat/fr-80-x FR-80-x.md FR-80 Eighty in-progress "" "src/x"
+git worktree add -q .claude/worktrees/fr-80-x feat/fr-80-x
+WT=$(cd .claude/worktrees/fr-80-x && pwd -P)   # physical: FR_WORKTREE is, so docker and co. see one path
+"$FR" hook setup FR-80 "$WT" > "$SP/h.out" 2>&1; rc=$?
+check "hook: no worktree_setup in the profile → nothing to run, exit 0" '[ "$rc" = 0 ] && grep -q "no worktree_setup in the profile" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+"$FR" hook teardown FR-80 .claude/worktrees/gone > "$SP/h.out" 2>&1; rc=$?
+check "hook: no hook configured and no worktree → still nothing to run, exit 0" '[ "$rc" = 0 ] && grep -q "no worktree_teardown in the profile" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+# the hook records its environment, its cwd and whether stdin is open; the
+# profile value ends in a comment, as any frontmatter value may
+printf -- '---\nworktree_setup: env | grep ^FR_ | sort > "$STUB/hook.env"; pwd >> "$STUB/hook.env"; if read -r x; then echo stdin >> "$STUB/hook.env"; else echo nostdin >> "$STUB/hook.env"; fi; echo "up on 3080"   # per worktree\n---\n' > .claude/workflow.md
+"$FR" hook setup '#80' .claude/worktrees/fr-80-x > "$SP/h.out" 2>&1; rc=$?
+check "hook setup: runs in the worktree with FR_ID, FR_NUMBER, FR_BRANCH, FR_WORKTREE, without stdin; output passes through" '[ "$rc" = 0 ] && [ "$(paste -sd " " "$STUB/hook.env")" = "FR_BRANCH=feat/fr-80-x FR_ID=FR-80 FR_NUMBER=80 FR_WORKTREE=$WT $WT nostdin" ] && grep -q "^up on 3080" "$SP/h.out" && grep -q "^worktree_setup done for FR-80" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out"; cat "$STUB/hook.env" 2>/dev/null)"
+# a quoted value keeps a " #" inside it; the comment starts after the quote
+cat > .claude/workflow.md <<'EOF'
+---
+worktree_setup: "echo 'PORT=3080 # dev' > $STUB/env.out"   # quoted, so the # inside stays
+---
+EOF
+"$FR" hook setup 80 "$WT" > "$SP/h.out" 2>&1; rc=$?
+check "hook setup: a quoted command may contain ' #'" '[ "$rc" = 0 ] && [ "$(cat "$STUB/env.out")" = "PORT=3080 # dev" ]' "exit $rc: $(cat "$SP/h.out"; cat "$STUB/env.out" 2>/dev/null)"
+# the command comes from the main checkout's profile, never from the worktree's
+# copy on the FR branch — also when fr.sh is run from inside the worktree
+printf -- '---\nworktree_setup: echo smuggled > "$STUB/env.out"\n---\n' > "$WT/.claude/workflow.md"
+(cd "$WT" && "$FR" hook setup 80 .) > "$SP/h.out" 2>&1; rc=$?
+check "hook: the command is read from the main checkout's profile, not the worktree's" '[ "$rc" = 0 ] && [ "$(cat "$STUB/env.out")" = "PORT=3080 # dev" ]' "exit $rc: $(cat "$SP/h.out"; cat "$STUB/env.out" 2>/dev/null)"
+git -C "$WT" checkout -q -- .claude/workflow.md
+printf -- '---\nworktree_setup: echo boom >&2; exit 7\nworktree_teardown: rm -f "$STUB/hook.env"; echo torn\n---\n' > .claude/workflow.md
+"$FR" hook setup 80 "$WT" > "$SP/h.out" 2>&1; rc=$?
+check "hook setup: a failing hook → exit 6, its output and exit code in the report" '[ "$rc" = 6 ] && grep -q "^boom" "$SP/h.out" && grep -q "worktree_setup failed (exit 7) for FR-80" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+"$FR" hook teardown 80 "$WT" > "$SP/h.out" 2>&1; rc=$?
+check "hook teardown: runs worktree_teardown" '[ "$rc" = 0 ] && [ ! -f "$STUB/hook.env" ] && grep -q "^torn" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+"$FR" check > "$SP/check.out" 2>&1
+check "check shows the hooks" 'grep -q "hooks:    setup: echo boom >&2; exit 7   teardown: rm -f" "$SP/check.out"' "$(cat "$SP/check.out")"
+# guards: a hook never runs anywhere but at the root of an FR worktree of this clone
+"$FR" hook teardown 80 .claude/worktrees/gone > "$SP/h.out" 2>&1; rc=$?
+check "hook: worktree gone → exit 1 with the command to run by hand" '[ "$rc" = 1 ] && grep -q "no such directory" "$SP/h.out" && grep -q "FR_ID=FR-80 FR_NUMBER=80 bash -c .rm -f" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+git worktree add -q --detach .claude/worktrees/_drop-fr-80 origin/feat/fr-80-x
+"$FR" hook teardown 80 .claude/worktrees/_drop-fr-80 > "$SP/h.out" 2>&1; rc=$?
+check "hook: temporary _drop- worktrees get no hook" '[ "$rc" = 1 ] && grep -q "temporary worktrees get no hook" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+git worktree remove .claude/worktrees/_drop-fr-80
+"$FR" hook teardown 80 . > "$SP/h.out" 2>&1; rc=$?
+check "hook: the main checkout is refused" '[ "$rc" = 1 ] && grep -q "is the main checkout" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+"$FR" hook teardown 80 .claude/worktrees/fr-80-x/req > "$SP/h.out" 2>&1; rc=$?
+check "hook: a directory inside a worktree is refused" '[ "$rc" = 1 ] && grep -q "not the root of a worktree" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+"$FR" hook setup 80 "$SP" > "$SP/h.out" 2>&1; rc=$?
+check "hook: a directory outside git is refused" '[ "$rc" = 1 ] && grep -q "not inside a git worktree" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+"$FR" hook setup 80 "$SP/regress/w" > "$SP/h.out" 2>&1; rc=$?
+check "hook: another clone is refused" '[ "$rc" = 1 ] && grep -q "not a worktree of this repository" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+"$FR" hook up 80 "$WT" > "$SP/h.out" 2>&1; rc=$?
+check "hook: unknown kind → usage error" '[ "$rc" = 1 ] && grep -q "setup or teardown" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+
 echo "--- $pass passed, $fail failed"
 [ "$fail" = 0 ]

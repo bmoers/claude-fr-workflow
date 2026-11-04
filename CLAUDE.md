@@ -11,8 +11,8 @@ pitfalls that the code does not show.
   built-ins (`/code-review`, `/security-review`, worktrees, `claude agents`,
   `--bg`) over GitHub features (issue forms) over own code. Own code only where
   nothing equivalent exists — here `scripts/fr.sh` (FR list, FR doc from the
-  issue, the FRs of a request, overlap, lock, board status), the skill texts and
-  the two review agents.
+  issue, the FRs of a request, overlap, lock, board status, worktree hooks), the
+  skill texts and the two review agents.
 - **Projects only get better, never worse.** Client repositories pin a tag. A
   change is released as a new tag, tested in the sandbox, and only then does a
   client's pin go up. Never move a pushed tag.
@@ -75,6 +75,17 @@ pitfalls that the code does not show.
   `LICENSE` beside them): the originals assume Anthropic's own codebase (Sentry,
   `logError`, error ids) and a plugin the client machine may not have. Upstream
   changes are not followed automatically. Its other agents duplicate built-ins.
+- **Worktree hooks** (0.5.4): `worktree_setup` / `worktree_teardown` are all
+  the plugin knows about what a project runs beside a worktree — a dev stack
+  per worktree, dependencies. They run through `fr.sh hook`, not from the skill
+  text, so environment and failure are cases in the suite. Not Claude Code's
+  `WorktreeCreate` hook: it fires only for `claude -w`, `isolation: "worktree"`
+  and background sessions, and replaces the creation of the worktree, while
+  `start` creates worktrees itself with `git worktree add`. Setup runs on every
+  start, resume included (idempotent by contract); teardown runs before
+  `claude rm` as well, which removes a finished session's worktree. A failed
+  hook is `blocked`, never retried, never `--force`. Ignored files are invisible
+  to the skills — the hooks' generated files belong in `.gitignore`.
 - Playwright MCP stays on `@latest` — maintained by Microsoft; accepted trade-off.
 - Jira is not implemented — FRs are GitHub issues. When needed, via Atlassian's
   official MCP server, not own code.
@@ -150,7 +161,8 @@ a new session there.
   `ship`, failure behaviour, board status · 0.5.1 board setup
   (`project-options`), the language of what goes to GitHub, first end-to-end
   run of 0.5 with the board · 0.5.2 `implement`, the pin procedure · 0.5.3 the
-  ship session's own model, agents on `opus`. Details:
+  ship session's own model, agents on `opus` · 0.5.4 worktree hooks
+  (`worktree_setup` / `worktree_teardown`, `fr.sh hook`). Details:
   [CHANGELOG.md](CHANGELOG.md).
 - Before 0.3.0, three `/code-review` rounds found 37, 23 and 19 issues. Recurring
   bug classes: `set -e` exit codes, git path quoting, ref normalization, branch

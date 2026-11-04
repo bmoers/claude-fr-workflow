@@ -110,6 +110,10 @@ End the session here.
   `origin/main` with the **FR document** as its first commit, pushes it, and
   prepares the worktree `.claude/worktrees/fr-20-coupon-field-checkout`. It never
   commits to the branch you are on, nor to `main`.
+- Runs the profile's `worktree_setup` in that worktree, if the project has one —
+  a dev stack per worktree, say — and shows what it printed. A hook that fails
+  stops this FR only; the worktree stays for you to look at (see
+  [worktree hooks](profile.md#worktree-hooks)).
 - Hands you the command for a fresh session in the worktree, with the model and
   effort chosen for this FR, and the first message to type there:
 
@@ -181,8 +185,9 @@ Run it in the main checkout, not in the worktree.
 - For each request the FR serves it checks whether **all** its FRs are closed.
   Only then does it propose closing the request — and closes it after you
   confirm.
-- Removes the worktree and the local branch. After a squash merge git cannot see
-  that the branch was merged; then it asks before deleting.
+- Runs the profile's `worktree_teardown`, if the project has one, then removes
+  the worktree and the local branch. After a squash merge git cannot see that
+  the branch was merged; then it asks before deleting.
 
 In the example: after FR-20 is merged, #12 stays open — FR-21 is not merged yet.
 After FR-21 is merged, both #12 and #15 can be closed.

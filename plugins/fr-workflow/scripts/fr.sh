@@ -25,6 +25,10 @@
 #   fr.sh project-status <issue> <event>
 #                                  the FR's status column in the GitHub project,
 #                                  per project_status; exit 5 if not written
+#   fr.sh hook setup|teardown <ID> <path>
+#                                  the profile's worktree_setup / worktree_teardown
+#                                  in that worktree, the FR in its environment;
+#                                  exit 6 if the hook failed
 #   fr.sh project-options [<value>...]
 #                                  add the values of project_status (or the given
 #                                  ones) that the status column does not have yet
@@ -46,6 +50,10 @@ cd "$TOP"
 # with non-ASCII characters ("FR-002-\303\274ber.md") and they no longer match.
 g() { git -c core.quotePath=false "$@"; }
 
+# A path argument as the caller meant it: fr.sh runs from the repository root,
+# so a relative path is resolved against the directory it was called from.
+caller_path() { case "$1" in /*) echo "$1" ;; *) echo "$CALLER/$1" ;; esac; }
+
 # Flat `key: value` lookup in the profile frontmatter, with a default.
 cfg() {
   local v=""
@@ -57,9 +65,11 @@ cfg() {
       {
         i = index($0, ":"); if (i == 0) next
         if (substr($0, 1, i - 1) != k) next
-        v = substr($0, i + 1)
-        sub(/[ \t]+#.*$/, "", v); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
-        if (v ~ /^".*"$/) v = substr(v, 2, length(v) - 2)
+        v = substr($0, i + 1); sub(/^[ \t]+/, "", v)
+        # a quoted value ends at its closing quote — a " #" inside it is part of
+        # the value; unquoted, " #" starts a comment
+        if (substr(v, 1, 1) == "\"" && (q = index(substr(v, 2), "\"")) > 0) v = substr(v, 2, q - 1)
+        else { sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v) }
         print v; exit
       }' "$PROFILE")
   fi
@@ -381,7 +391,7 @@ cmd_spec() {
   local ref out="${2:-}" meta body doc rc=0
   ref=$(issue_ref "$1")
   if [ -n "$out" ]; then
-    case "$out" in /*) ;; *) out="$CALLER/$out" ;; esac
+    out=$(caller_path "$out")
     [ ! -e "$out" ] || die "$out exists — not overwritten"
   fi
   meta=$(gh issue view "${ref##*#}" -R "${ref%%#*}" --json state,labels,title \
@@ -789,6 +799,68 @@ EOF
   echo "workflows have no API — set them on $PROJ_URL/workflows: Item added to project → the 'defined' value, Item closed → the 'done' value, Auto-add to project with is:issue label:fr"
 }
 
+# --- worktree hooks -----------------------------------------------------------
+#
+# A project may need more than the checkout in every FR worktree — a dev stack
+# per worktree so FRs can be tested in parallel, installed dependencies, an .env
+# with this worktree's ports. The profile names one command for each end of the
+# worktree's life: `worktree_setup` runs after :start added or resumed it,
+# `worktree_teardown` in :done before anything removes it — `claude rm` included,
+# which deletes a finished session's worktree. The plugin knows nothing else
+# about them: the command runs in the worktree through `bash -c`, without stdin,
+# with the FR in its environment; its output passes through, its exit code
+# decides. Exit 6 = the hook failed; the skill leaves the worktree as it is and
+# the user decides. Setup runs on every start of an FR, resume included, so the
+# command must be idempotent. A hook runs only at the root of a linked worktree
+# of this clone — never in the main checkout, never in a directory inside a
+# worktree, never for the temporary `_drop-` worktrees. A worktree already gone
+# gets the command printed for running by hand: a teardown such as
+# `docker compose down -v` must not run anywhere else.
+HOOK_FAILED=6
+
+cmd_hook() {
+  [ $# -eq 3 ] || die "usage: fr.sh hook setup|teardown <ID> <worktree path>"
+  local kind="$1" key ref num dir top main common branch cmd rc
+  case "$kind" in
+    setup) key=worktree_setup ;;
+    teardown) key=worktree_teardown ;;
+    *) die "unknown hook '$kind': setup or teardown" ;;
+  esac
+  ref=$(issue_ref "$2"); num=${ref##*#}
+  # the command comes from the main checkout's profile — the base branch's,
+  # reviewed in PRs — never from the copy on an FR branch, wherever we run
+  main=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+  local PROFILE="$main/$PROFILE"
+  cmd=$(cfg "$key" "")
+  if [ -z "$cmd" ]; then echo "no $key in the profile — nothing to run"; return 0; fi
+  dir=$(caller_path "$3")
+  if [ ! -d "$dir" ]; then
+    echo "fr.sh: no such directory: $3 — a hook runs only in its worktree. By hand, if needed:" >&2
+    echo "  FR_ID=$PREFIX-$num FR_NUMBER=$num bash -c '$cmd'" >&2
+    exit 1
+  fi
+  dir=$(cd "$dir" && pwd -P)
+  case "$(basename "$dir")" in
+    _drop-*) die "temporary worktrees get no hook: $dir" ;;
+  esac
+  top=$(cd "$dir" && git rev-parse --show-toplevel 2>/dev/null) || die "$3 is not inside a git worktree"
+  [ "$(cd "$top" && pwd -P)" = "$dir" ] || die "$3 is not the root of a worktree (that is $top)"
+  [ "$(cd "$main" && pwd -P)" != "$dir" ] || die "$3 is the main checkout — hooks run only in FR worktrees"
+  common=$(cd "$dir" && cd "$(git rev-parse --git-common-dir)" && pwd -P)
+  [ "$common" = "$(cd "$(git rev-parse --git-common-dir)" && pwd -P)" ] ||
+    die "$3 is not a worktree of this repository"
+  branch=$(cd "$dir" && git branch --show-current 2>/dev/null) || branch=""
+  echo "$key for $PREFIX-$num in $dir: $cmd"
+  if (cd "$dir" && FR_ID="$PREFIX-$num" FR_NUMBER="$num" FR_BRANCH="$branch" FR_WORKTREE="$dir" \
+        bash -c "$cmd" </dev/null); then
+    echo "$key done for $PREFIX-$num"
+  else
+    rc=$?
+    echo "fr.sh: $key failed (exit $rc) for $PREFIX-$num in $dir" >&2
+    exit "$HOOK_FAILED"
+  fi
+}
+
 cmd_check() {
   local ok=1 repo project ver note
   # cur_repo exits its subshell on failure, so test the assignment itself
@@ -800,6 +872,9 @@ cmd_check() {
   if [ -f "$PROFILE" ]; then echo "profile:  $PROFILE"; else echo "profile:  MISSING ($PROFILE) — run /fr-workflow:init"; ok=0; fi
   echo "issues:   $(cfg issue_repo "${repo:-?}")"
   echo "fr_dir:   $FR_DIR   prefix: $PREFIX   base: $BASE"
+  if [ -n "$(cfg worktree_setup "")" ] || [ -n "$(cfg worktree_teardown "")" ]; then
+    echo "hooks:    setup: $(cfg worktree_setup "—")   teardown: $(cfg worktree_teardown "—")"
+  fi
   project=$(cfg project "")
   if [ -n "$project" ]; then
     if [ -n "$(cfg project_status "")" ]; then
@@ -833,5 +908,6 @@ case "$cmd" in
   lock) cmd_lock "$@" ;;
   project-status) cmd_project_status "$@" ;;
   project-options) cmd_project_options "$@" ;;
-  *) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  hook) cmd_hook "$@" ;;
+  *) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

@@ -25,6 +25,8 @@ size_models: "S=sonnet/low, M=sonnet/medium, L=opus/high, XL=opus/xhigh"   # iss
 ship_model: opus                  # model of the ship session: reviews, gates, acceptance check
 ship_effort: high                 # low | medium | high | xhigh | max
 shared_paths: []                  # paths every FR may touch, e.g. [package-lock.json, db/migrations]
+worktree_setup:                   # command run in every FR worktree after start created or resumed it, e.g. scripts/stack.sh up — idempotent, non-interactive; empty = nothing
+worktree_teardown:                # command run before done removes the worktree, e.g. scripts/stack.sh down; empty = nothing
 ---
 
 # Workflow profile

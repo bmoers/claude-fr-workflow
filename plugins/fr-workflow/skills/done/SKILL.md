@@ -1,6 +1,6 @@
 ---
 name: done
-description: Close out an FR — after its PR was merged, or to drop it. Closes the FR issue and, after confirmation, the requests it fully served; removes the worktree and local branch.
+description: Close out an FR — after its PR was merged, or to drop it. Closes the FR issue and, after confirmation, the requests it fully served; runs the profile's worktree_teardown, removes the worktree and the local branch.
 argument-hint: "<#47 | FR-47 | PR number> [drop]"
 disable-model-invocation: true
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh *)
@@ -38,7 +38,8 @@ by `drop`.
    `git worktree add --detach .claude/worktrees/_drop-<id-lower> origin/<branch>`,
    there set `status: dropped`, add a section `## Dropped` with date and reason,
    commit (`docs(fr): drop <ID>` or the project's convention),
-   `git push origin HEAD:<branch>`, remove the temporary worktree.
+   `git push origin HEAD:<branch>`, remove the temporary worktree (no worktree
+   hook runs for it; the FR's own worktree is torn down in C.2).
    The branch was never pushed → nothing to publish: mark it dropped locally.
    The FR exists **only on the base branch** (`location: base`, no branch): the
    change has to reach the base branch, which is usually protected. Create a
@@ -78,15 +79,28 @@ by `drop`.
    - A Claude session still running in the FR's worktree? Check
      `claude agents --json` (match `cwd` to the worktree path, or `name` starting
      with `<ID> `). Running → stop here and name it; the user ends it
-     (`claude stop <id>`) or lets it finish. A finished background session:
-     `claude rm <id>` — it also removes the session's worktree and its lock when
-     that is safe (it refuses on unpushed work), so the next two points may have
-     nothing left to do.
+     (`claude stop <id>`) or lets it finish.
    - `git worktree list --porcelain` shows the worktree `locked claude session …
      (pid N …)`: pid N still running (`ps -p N`) → a session is alive, stop as
      above. Not running → stale lock: `git worktree unlock <path>`.
+   - `fr.sh hook teardown <ID> <worktree path>` — the profile's
+     `worktree_teardown`, when it has one and the worktree exists here, **before
+     anything removes the worktree**: `claude rm` deletes a finished session's
+     worktree too, and a stack still running on a removed worktree keeps its
+     ports and volumes. Exit 6 → show the output, keep the worktree,
+     `fr.sh project-status <ID> blocked`, and **stop here** — no step 3: the
+     board must not say `done` while the stack is up. The user looks at it and
+     runs `done` again; issues already closed stay closed, the teardown runs
+     again. Worktree already gone (a `claude rm` or a `git worktree remove` by
+     hand) → the command exits 1 and prints the hook's command for running by
+     hand; put it into the report and go on.
+   - A finished background session: `claude rm <id>` — it also removes the
+     session's worktree and its lock when that is safe (it refuses on unpushed
+     work), so the next point may have nothing left to do.
    - `git worktree remove .claude/worktrees/<…>` — refuses on uncommitted changes:
-     report them, never `--force`.
+     report them, never `--force`. Files the project ignores (`.gitignore`) do
+     not count; generated files that are not ignored do — the teardown hook is
+     where they are removed.
    - `git branch -d <branch>` **before** deleting the remote branch — while
      `origin/<branch>` still exists, git accepts `-d` after a squash merge. It
      refuses after a drop, or once the remote branch is gone: ask before `-D`.

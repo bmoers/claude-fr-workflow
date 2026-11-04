@@ -52,8 +52,9 @@ wall. Exit 5 (not written) is a line in the report, never a reason to stop.
   the FR doc.
 - Open PR of this branch, if any: `gh pr list --head <branch> --state open --json number,url`
   (`gh pr view` without a number may return a closed or merged PR).
-- Look at uncommitted changes. Anything that does not belong to the FR → ask;
-  never restore or discard it.
+- Look at uncommitted changes (`git status --porcelain`; files the project
+  ignores are not changes — a dev stack's generated files, say). Anything that
+  does not belong to the FR → ask; never restore or discard it.
 
 ## 1. Review gate — code and security
 

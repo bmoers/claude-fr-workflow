@@ -122,6 +122,28 @@ Every fr-workflow skill reads this first.
   — that is how `fr.sh` finds FR docs on branches.
 - One worktree per FR at `.claude/worktrees/<id-lower>-<slug>` (gitignored),
   created by `:start`.
+- **Worktree hooks.** A project that needs more than the checkout in every
+  worktree — a dev stack per worktree so FRs are tested in parallel, installed
+  dependencies, an `.env` with this worktree's ports — names one command for each
+  end in the profile: `worktree_setup` and `worktree_teardown`. `fr.sh hook
+  setup <ID> <path>` runs after `:start` created or resumed a worktree, `fr.sh
+  hook teardown <ID> <path>` in `:done` before anything removes one — before
+  `claude rm` too, which deletes a finished session's worktree. The command runs
+  in the worktree, without stdin, with `FR_ID`, `FR_NUMBER`, `FR_BRANCH` and
+  `FR_WORKTREE` in its environment; what it prints is shown and its last lines
+  go into `:start`'s hand-over. Setup runs on every start of the FR, so it must be
+  idempotent. Exit 6 = the hook failed: show the output, leave the worktree,
+  write `blocked`, the user decides — no retry, no `--force`, no session for
+  that FR, no `done` on the board. A hook runs only at the root of a linked
+  worktree of this clone — never in the main checkout, never for the temporary
+  `_drop-` worktrees; a worktree already gone gets the command printed for
+  running by hand. The command is read from the **main checkout's** profile,
+  the base branch's, never from the copy on an FR branch. The plugin knows
+  nothing else about what the hooks do.
+- **Ignored files are invisible.** What the project lists in `.gitignore` — a
+  stack's generated files, dependencies — is never a question in `:ship` and
+  never stops `git worktree remove`. Generated files that are not ignored do stop
+  it: the teardown hook removes them, or the project ignores them.
 - The FR doc travels with the code and reaches the base branch with the merge.
 - There is **no shared index file**: a table edited in every PR conflicts and
   drifts. The overview is `/fr-workflow:status`.
@@ -199,7 +221,7 @@ value writes nothing. `fr.sh project-status <issue> <event>`:
 | `input`    | `:new`, `:implement`, `:ship`   | a skill stops with a question: open questions left on purpose, a decision only the user can take, unclear uncommitted changes, unverified criteria, a login wall |
 | `running`  | `:start`, `:implement`, `:ship` | branch, worktree and session exist; a resumed FR; `:implement` goes on after an answer; `:ship` starts                                                           |
 | `failed`   | `:ship`                         | a gate found a defect in the change: review or security findings under `stop`, a secret, red CI, a failed criterion                                              |
-| `blocked`  | `:ship`                         | something outside the change holds it up: the ship lock, a deployment that does not come, a merge conflict that needs a decision                                 |
+| `blocked`  | `:start`, `:ship`, `:done`      | something outside the change holds it up: a worktree hook that failed, the ship lock, a deployment that does not come, a merge conflict that needs a decision    |
 | `approval` | `:ship`                         | finished: PR open, acceptance check recorded — the merge is the user's                                                                                           |
 | `done`     | `:done`                         | merged or dropped                                                                                                                                                |
 
@@ -214,16 +236,17 @@ written.
 
 `${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh`, from anywhere inside the repository:
 
-| Command                                     | Does                                                                                                                                                                                                                     |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `check`                                     | prerequisites and profile                                                                                                                                                                                                |
-| `list`                                      | all FRs as TSV: `id status location ref path pr issue requests title areas model effort`                                                                                                                                 |
-| `spec <issue> [<file>]`                     | the FR doc of an FR issue — to stdout to check it, into a new `<file>` at the start. Exit 4 = not ready, with the reasons                                                                                                |
-| `issue-frs <issue>`                         | the FRs serving a request: `ref state reason via` — `reason` `completed`, `not_planned` or `duplicate` once closed; `via` `self`, `sub` or `requests`                                                                    |
-| `overlap [<ID>...]`                         | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now |
-| `lock acquire\|release\|break\|status <ID>` | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs                                                                                  |
-| `project-status <issue> <event>`            | the board column of an FR issue per `project_status`: `defined`, `input`, `running`, `failed`, `blocked`, `approval`, `done`. Exit 5 = not written, reason on stderr — a line for the report, never a stop               |
-| `project-options [<value>...]`              | adds the values of `project_status` (or the given ones) that the status column lacks; existing options keep id, colour and text. Prints the project's *Workflows* page. Exit 5 = nothing changed, reason on stderr       |
+| Command                                     | Does                                                                                                                                                                                                                                          |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `check`                                     | prerequisites and profile                                                                                                                                                                                                                     |
+| `list`                                      | all FRs as TSV: `id status location ref path pr issue requests title areas model effort`                                                                                                                                                      |
+| `spec <issue> [<file>]`                     | the FR doc of an FR issue — to stdout to check it, into a new `<file>` at the start. Exit 4 = not ready, with the reasons                                                                                                                     |
+| `issue-frs <issue>`                         | the FRs serving a request: `ref state reason via` — `reason` `completed`, `not_planned` or `duplicate` once closed; `via` `self`, `sub` or `requests`                                                                                         |
+| `overlap [<ID>...]`                         | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now                      |
+| `lock acquire\|release\|break\|status <ID>` | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs                                                                                                       |
+| `project-status <issue> <event>`            | the board column of an FR issue per `project_status`: `defined`, `input`, `running`, `failed`, `blocked`, `approval`, `done`. Exit 5 = not written, reason on stderr — a line for the report, never a stop                                    |
+| `hook setup\|teardown <ID> <path>`          | the profile's `worktree_setup` / `worktree_teardown` in that worktree, without stdin, with `FR_ID`, `FR_NUMBER`, `FR_BRANCH`, `FR_WORKTREE`; output passes through. Exit 6 = the hook failed; no hook in the profile = nothing to run, exit 0 |
+| `project-options [<value>...]`              | adds the values of `project_status` (or the given ones) that the status column lacks; existing options keep id, colour and text. Prints the project's *Workflows* page. Exit 5 = nothing changed, reason on stderr                            |
 
 `location` is `issue` (not started; `ref` is the issue), `base`, `branch` (then
 `ref` is the branch) or `local` (uncommitted in this checkout). `list` and
