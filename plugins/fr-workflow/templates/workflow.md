@@ -27,6 +27,13 @@ ship_effort: high                 # low | medium | high | xhigh | max
 shared_paths: []                  # paths every FR may touch, e.g. [package-lock.json, db/migrations]
 worktree_setup:                   # command run in every FR worktree after start created or resumed it, e.g. scripts/stack.sh up — idempotent, non-interactive; empty = nothing
 worktree_teardown:                # command run before done removes the worktree, e.g. scripts/stack.sh down; empty = nothing
+autopilot_model: sonnet           # model of the autopilot session — it drives, it does not judge
+autopilot_effort: medium          # low | medium | high | xhigh | max
+autopilot_sessions: 3             # FR sessions the autopilot runs at a time
+fix_loop: off                     # off | checks | checks+comments — what the autopilot sends back to a fix session
+fix_attempts: 2                   # fix sessions per FR, then it is reported
+fix_skip_checks: []               # checks that never go to the fix loop, e.g. [CodeQL, gitleaks]
+fix_comment_bots: []              # bots whose PR comments count for checks+comments, e.g. [claude[bot]]
 ---
 
 # Workflow profile

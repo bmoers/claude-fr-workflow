@@ -161,6 +161,9 @@ later —
 | answer its questions or take over     | `claude attach "<ID>"` |
 | the FRs with their sessions           | `/fr-workflow:status`  |
 
+To take the FRs further without a hand-off per step — ship once implemented,
+the next wave after each merge — `/fr-workflow:autopilot <IDs>`.
+
 Background sessions stop at permission prompts and wait — `claude agents` shows
 them as waiting; attach to answer. Each one ends with a summary; then
 `/fr-workflow:ship` — in that FR's ship session, or attached in the background

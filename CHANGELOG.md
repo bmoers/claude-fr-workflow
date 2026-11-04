@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.6.0] — 2026-11-04
+
+### Added
+
+- **`/fr-workflow:autopilot`:** drives queued FRs without a hand-off per step.
+  It starts wave 1, opens the ship session once an implementation reports
+  `implemented`, and after each merge starts the FRs that waited for it. Runs
+  as the background session `fr-autopilot` (`--here`: in your session);
+  `status`, `stop`, `rm`. Never merges, never answers a session's question.
+- **Fix loop**, opt-in: `fix_loop: off | checks | checks+comments`,
+  `fix_attempts` (default 2), `fix_skip_checks`, `fix_comment_bots`. A red
+  local check or CI run, and with `checks+comments` a new PR comment by an
+  author with write access or a listed bot, goes to a fresh implementation
+  session (`/fr-workflow:implement <ID> fix`), then to a full new ship. Secrets,
+  security findings, review findings under `stop` and failed acceptance criteria
+  never enter it.
+- `fr.sh pipeline` (phase and next action per queued FR, `--wait` until it
+  changes), `fr.sh launch implement|fix|ship|autopilot`, `fr.sh queue`,
+  `fr.sh fix-brief`.
+- Event `implemented`, written by `:implement` at its hand-over.
+- Profile: `autopilot_model` (`sonnet`), `autopilot_effort` (`medium`),
+  `autopilot_sessions` (3).
+
+### Changed
+
+- `fr.sh project-status <issue> <event> [<gate>]`: every event is appended to
+  the FR's local log in the git common dir first, whatever the board does.
+  `:ship` passes the gate that stopped it (`failed ci`, `blocked conflict`, …).
+- Hard rule: a skill still never fixes what its own gate found; the only fix
+  loop is the autopilot's, opt-in and bounded.
+- `:done` removes the FR from the autopilot's queue.
+
 ## [0.5.4] — 2026-11-04
 
 ### Added

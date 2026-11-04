@@ -39,13 +39,28 @@ case "$*" in
   "project item-add"*) [ ! -f "$STUB/item-add-fails" ] || { echo "could not resolve to a node with the global id" >&2; exit 1; } ;;
   "project item-edit"*) [ ! -f "$STUB/item-edit-fails" ] || { echo "option 'Complete' not found for field 'Status'" >&2; exit 1; } ;;
   "--version") answer version ;;
+  "pr list"*) answer prlist ;;
+  "pr view"*) [ ! -f "$STUB/prview-fails" ] || exit 1; answer prview ;;
   "api graphql -f query="*) answer options ;;
   "api graphql --input -"*) cat > "$STUB/mutation.in"; [ ! -f "$STUB/mutation-fails" ] || { echo "Field 'singleSelectOptions' nope" >&2; exit 1; }; answer mutated ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 1 ;;
 esac
 EOF
 chmod +x "$SP/stubbin/gh"
-export PATH="$SP/stubbin:$PATH" STUB=$SP/stub STUB_LOG=$SP/stub.log
+# stub claude: logs every call; `stop` ends the session the test pretends runs
+# (its pid in $STUB/session.pid); a launch prints a session id like claude --bg
+cat > "$SP/stubbin/claude" <<'EOF'
+#!/bin/bash
+echo "$*" >> "$CLAUDE_LOG"
+if [ "$1" = stop ]; then
+  if [ -f "$STUB/session.pid" ]; then kill "$(cat "$STUB/session.pid")" 2>/dev/null; rm -f "$STUB/session.pid"; fi
+  exit 0
+fi
+[ ! -f "$STUB/claude-untrusted" ] || { echo "Workspace not trusted" >&2; exit 1; }
+echo "Started background session ses$(wc -l < "$CLAUDE_LOG" | tr -d ' ')0a. Attach with: claude attach ses$(wc -l < "$CLAUDE_LOG" | tr -d ' ')0a"
+EOF
+chmod +x "$SP/stubbin/claude"
+export PATH="$SP/stubbin:$PATH" STUB=$SP/stub STUB_LOG=$SP/stub.log CLAUDE_LOG=$SP/claude.log
 stub() { printf '%s\n' "$2" > "$STUB/$1"; }   # stub <file> <content>
 nostub() { rm -f "$STUB/$1"; }
 stub version "gh version 2.98.0 (2026-08-20)"   # new enough for project-status
@@ -61,7 +76,7 @@ newrepo() { # newrepo <dir> <origin-url>
 fm() { printf -- '---\nid: %s\ntitle: %s\nstatus: %s\nrequests: [%s]\nareas: [%s]\n---\n' "$@"; }
 branch_fr() { # branch_fr <branch> <file> <fm args...>
   local b=$1 f=$2; shift 2
-  git switch -q -c "$b" origin/main; fm "$@" > "req/feature-requests/$f"
+  git switch -q -c "$b" origin/main; mkdir -p req/feature-requests; fm "$@" > "req/feature-requests/$f"
   git add -A; git commit -qm "$b"; git push -q -u origin HEAD 2>/dev/null; git switch -q main
 }
 
@@ -398,6 +413,109 @@ check "hook: a directory outside git is refused" '[ "$rc" = 1 ] && grep -q "not 
 check "hook: another clone is refused" '[ "$rc" = 1 ] && grep -q "not a worktree of this repository" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
 "$FR" hook up 80 "$WT" > "$SP/h.out" 2>&1; rc=$?
 check "hook: unknown kind → usage error" '[ "$rc" = 1 ] && grep -q "setup or teardown" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+
+# --- autopilot: queue, pipeline, launch, fix loop
+newrepo "$SP/regress-ap" git@github.com:acme/ap.git
+printf -- '---\nautopilot_sessions: 2\n---\n' > .claude/workflow.md
+printf '.claude/worktrees/\n' > .gitignore
+git add -A; git commit -qm init; git push -q -u origin main
+stub issues "$(printf '70\tSeventy\t%s\n71\tSeventy-one\t%s\n72\tSeventy-two\t%s\n73\tSeventy-three\t%s' \
+  "$(body '## Planning' '- Areas: src/a')" "$(body '## Planning' '- Areas: src/a/x')" \
+  "$(body '## Planning' '- Areas: src/b')" "$(body '## Planning' '- Areas: src/c')")"
+stub prlist ""; nostub prview; : > "$CLAUDE_LOG"
+"$FR" queue add 70 '#71' FR-72 fr-73 FR-70 > "$SP/q.out" 2>&1
+check "queue: ids made canonical, each once" '[ "$(paste -sd " " "$SP/q.out")" = "FR-70 FR-71 FR-72 FR-73" ]' "$(cat "$SP/q.out")"
+"$FR" pipeline --no-fetch > "$SP/p.out" 2>&1
+check "pipeline: wave 1 starts" 'grep -q "^FR-70	queued	start" "$SP/p.out" && grep -q "^FR-72	queued	start" "$SP/p.out"' "$(cat "$SP/p.out")"
+check "pipeline: an overlapping FR waits, with the reason" 'grep -q "^FR-71	queued	wait	wave 2: FR-70 src/a ~ src/a/x" "$SP/p.out"' "$(cat "$SP/p.out")"
+check "pipeline: starts beyond autopilot_sessions wait" 'grep -q "^FR-73	queued	wait	session limit" "$SP/p.out"' "$(cat "$SP/p.out")"
+
+# FR-70 started, its session alive in the worktree (lock names a live pid)
+branch_fr feat/fr-70-a FR-70-a.md FR-70 Seventy in-progress "" "src/a"
+git worktree add -q .claude/worktrees/fr-70-a feat/fr-70-a
+{ sleep 300 & } 2>/dev/null; echo $! > "$STUB/session.pid"; disown $!
+git worktree lock --reason "claude session (pid $(cat "$STUB/session.pid"))" .claude/worktrees/fr-70-a
+"$FR" pipeline --no-fetch > "$SP/p.out" 2>&1
+check "pipeline: a live session without reports is implementing" 'grep -q "^FR-70	implementing	none" "$SP/p.out"' "$(cat "$SP/p.out")"
+check "pipeline: FR-71 still waits for the running FR-70" 'grep -q "^FR-71	queued	wait" "$SP/p.out"' "$(cat "$SP/p.out")"
+"$FR" project-status 70 failed "CI red" > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: a gate is one word" '[ "$rc" = 1 ] && grep -q "one lowercase word" "$SP/ps.out"' "exit $rc: $(cat "$SP/ps.out")"
+"$FR" project-status 70 implemented > "$SP/ps.out" 2>&1; rc=$?
+LOG70="$(git rev-parse --git-common-dir)/fr-workflow/FR-70.log"
+check "project-status: logs the event locally, board not configured" '[ "$rc" = 0 ] && grep -q " event implemented$" "$LOG70"' "exit $rc: $(cat "$SP/ps.out" "$LOG70" 2>&1)"
+check "pipeline: implemented → ship, says the worktree is still held" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	implemented	ship	a session still holds"' "$("$FR" pipeline --no-fetch 2>&1)"
+"$FR" launch ship FR-70 > "$SP/l.out" 2>&1; rc=$?
+check "launch: an unknown live session is never stopped (exit 3)" '[ "$rc" = 3 ] && grep -q "did not start holds fr-70-a" "$SP/l.out" && ! grep -q "^stop" "$CLAUDE_LOG"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+"$FR" launch ship FR-70 --replace sesMANUAL1 > "$SP/l.out" 2>&1; rc=$?
+check "launch: --replace stops that session, then the ship session with ship_model" '[ "$rc" = 0 ] && grep -qx "stop sesMANUAL1" "$CLAUDE_LOG" && grep -qx -- "-w fr-70-a --bg --model opus --effort high -n FR-70 ship /fr-workflow:ship FR-70" "$CLAUDE_LOG"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+check "launch: records the session id" 'grep -qE " launch ship ses[0-9]+0a$" "$LOG70"' "$(cat "$LOG70")"
+check "pipeline: launched but no session holds the worktree → stalled" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	stalled	report	the ship session"' "$("$FR" pipeline --no-fetch 2>&1)"
+{ sleep 300 & } 2>/dev/null; echo $! > "$STUB/session.pid"; disown $!
+git worktree unlock .claude/worktrees/fr-70-a; git worktree lock --reason "claude session (pid $(cat "$STUB/session.pid"))" .claude/worktrees/fr-70-a
+check "pipeline: launched and held → shipping" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	shipping	none"' "$("$FR" pipeline --no-fetch 2>&1)"
+"$FR" project-status 70 failed ci >/dev/null 2>&1
+check "pipeline: red CI with fix_loop off → report" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	failed	report	ci (fix_loop: off)"' "$("$FR" pipeline --no-fetch 2>&1)"
+printf -- '---\nautopilot_sessions: 2\nfix_loop: checks\nfix_attempts: 1\nfix_skip_checks: [CodeQL, gitleaks]\n---\n' > .claude/workflow.md
+check "pipeline: red CI with fix_loop checks → fix" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	failed	fix	ci, attempt 1/1"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub prlist "91"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncheck\tbuild\tfail\ncheck\tcodeql\tfail\ncheck\tlint\tpass')"
+check "pipeline: a red check from fix_skip_checks never goes to the fix loop" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	failed	report	ci: codeql never"' "$("$FR" pipeline --no-fetch 2>&1)"
+"$FR" fix-brief FR-70 > "$SP/fb.out" 2>&1
+check "fix-brief: names the red checks, marks the skipped one" 'grep -q "^red check: build" "$SP/fb.out" && grep -q "not for the fix loop: codeql" "$SP/fb.out" && grep -q "attempt: 1/1" "$SP/fb.out"' "$(cat "$SP/fb.out")"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncheck\tbuild\tfail')"
+: > "$CLAUDE_LOG"
+"$FR" launch fix 70 > "$SP/l.out" 2>&1; rc=$?
+check "launch fix: stops the autopilot's own session, implement in fix mode with the FR's model" '[ "$rc" = 0 ] && grep -qE "^stop ses[0-9]+0a$" "$CLAUDE_LOG" && grep -qx -- "-w fr-70-a --bg --model opus --effort high -n FR-70 fix 1 /fr-workflow:implement FR-70 fix" "$CLAUDE_LOG"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+"$FR" launch fix 70 > "$SP/l.out" 2>&1; rc=$?
+check "launch fix: beyond fix_attempts → exit 3" '[ "$rc" = 3 ] && grep -q "used its 1 fix attempts" "$SP/l.out"' "exit $rc: $(cat "$SP/l.out")"
+"$FR" project-status 70 failed ci >/dev/null 2>&1
+check "pipeline: attempts used up → report" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	failed	report	ci, fix attempts used up (1/1)"' "$("$FR" pipeline --no-fetch 2>&1)"
+"$FR" project-status 70 failed security >/dev/null 2>&1
+check "pipeline: security findings never go to the fix loop" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	failed	report	security$"' "$("$FR" pipeline --no-fetch 2>&1)"
+if [ -f "$STUB/session.pid" ]; then kill "$(cat "$STUB/session.pid")" 2>/dev/null; rm -f "$STUB/session.pid"; fi
+
+# FR-72 in review: the PR decides
+# (branch_fr commits uncommitted changes onto the FR branch: profile edits come after it)
+branch_fr feat/fr-72-b FR-72-b.md FR-72 Seventy-two in-review "" "src/b"
+printf -- '---\nautopilot_sessions: 2\nfix_loop: checks\n---\n' > .claude/workflow.md
+stub prlist "92"
+"$FR" project-status 72 approval >/dev/null 2>&1
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncheck\tbuild\tpass\ncomment\t1\tMEMBER\tboris\thttps://x/1\ncomment\t4102444800\tNONE\tstranger\thttps://x/2')"
+check "pipeline: green PR, only old or untrusted comments → waits for the merge" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	none	PR #92 waits for your merge"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tCOLLABORATOR\tboris\thttps://x/3')"
+check "pipeline: a collaborator's new comment, fix_loop checks → report" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	report	PR #92: comments by boris (fix_loop: checks)"' "$("$FR" pipeline --no-fetch 2>&1)"
+printf -- '---\nautopilot_sessions: 2\nfix_loop: checks+comments\nfix_comment_bots: [claude[bot]]\n---\n' > .claude/workflow.md
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tNONE\tapp/claude\treview CHANGES_REQUESTED')"
+check "pipeline: a listed bot's review, checks+comments → fix" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	fix	PR #92: comments by app/claude, attempt 1/2"' "$("$FR" pipeline --no-fetch 2>&1)"
+"$FR" fix-brief 72 > "$SP/fb.out" 2>&1
+check "fix-brief: lists the trusted comments" 'grep -q "^comment by app/claude: review CHANGES_REQUESTED" "$SP/fb.out"' "$(cat "$SP/fb.out")"
+stub prview "$(printf 'pr\tOPEN\tCONFLICTING\tDIRTY')"
+check "pipeline: a conflicting PR → ship again" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	ship	PR #92 conflicts"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub prview "$(printf 'pr\tCLOSED\tUNKNOWN\tUNKNOWN')"
+check "pipeline: a PR closed unmerged → report" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	report	PR #92 closed"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tCLEAN')"
+
+# --wait: wakes at once on news, otherwise only after --max
+"$FR" pipeline --no-fetch --wait 1 --max 30 > "$SP/w1.out" 2>&1
+t0=$(date +%s); "$FR" pipeline --no-fetch --wait 1 --max 3 > "$SP/w2.out" 2>&1; dt=$(( $(date +%s) - t0 ))
+check "pipeline --wait: same result → waits until --max" '[ "$dt" -ge 2 ] && cmp -s "$SP/w1.out" "$SP/w2.out"' "dt=$dt"
+"$FR" queue rm FR-73 >/dev/null
+t0=$(date +%s); "$FR" pipeline --no-fetch --wait 1 --max 30 > "$SP/w3.out" 2>&1; dt=$(( $(date +%s) - t0 ))
+check "pipeline --wait: a change wakes it at once" '[ "$dt" -le 2 ] && ! grep -q "^FR-73" "$SP/w3.out"' "dt=$dt $(cat "$SP/w3.out")"
+
+# launches: a title from the issue never reaches the shell; the autopilot itself
+git stash -q -u 2>/dev/null || true
+branch_fr feat/fr-74-c FR-74-c.md FR-74 'Say "hi" $HOME `x`' in-progress "" "src/d"
+git worktree add -q .claude/worktrees/fr-74-c feat/fr-74-c
+: > "$CLAUDE_LOG"
+"$FR" launch implement FR-74 > "$SP/l.out" 2>&1; rc=$?
+check "launch implement: title without quotes, \$ or backticks in the session name" '[ "$rc" = 0 ] && grep -qx -- "-w fr-74-c --bg --model opus --effort high -n FR-74 Say hi HOME x /fr-workflow:implement FR-74" "$CLAUDE_LOG"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+touch "$STUB/claude-untrusted"
+"$FR" launch ship FR-74 > "$SP/l.out" 2>&1; rc=$?
+check "launch: claude fails → exit 1 with its message, nothing logged" '[ "$rc" = 1 ] && grep -q "Workspace not trusted" "$SP/l.out" && ! grep -q "launch ship" "$(git rev-parse --git-common-dir)/fr-workflow/FR-74.log"' "exit $rc: $(cat "$SP/l.out")"
+rm -f "$STUB/claude-untrusted"
+"$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
+check "launch autopilot: background session with autopilot_model, id kept" '[ "$rc" = 0 ] && grep -qx -- "--bg -n fr-autopilot --model sonnet --effort medium /fr-workflow:autopilot --loop" "$CLAUDE_LOG" && "$FR" queue session | grep -qE "^ses[0-9]+0a$"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
 
 echo "--- $pass passed, $fail failed"
 [ "$fail" = 0 ]

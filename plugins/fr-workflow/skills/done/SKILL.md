@@ -58,6 +58,9 @@ by `drop`.
 
 ## C. Issues and cleanup
 
+0. `fr.sh queue rm <ID>` — the autopilot no longer follows the FR (a no-op when
+   it was not queued).
+
 1. One table — issue · its FRs with their state · proposal — and act only on what
    the user confirms:
    - the FR's issue, if still open (A.2, B.4):

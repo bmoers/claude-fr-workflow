@@ -22,9 +22,18 @@
 #                                  start alongside the in-progress ones: waves
 #   fr.sh lock acquire|release|break|status [<ID>]
 #                                  ship lock for a shared test environment
-#   fr.sh project-status <issue> <event>
-#                                  the FR's status column in the GitHub project,
-#                                  per project_status; exit 5 if not written
+#   fr.sh project-status <issue> <event> [<gate>]
+#                                  record the event in the local FR log, then the
+#                                  FR's status column in the GitHub project, per
+#                                  project_status; exit 5 if not written
+#   fr.sh queue add|rm|list|clear|session [<ID>...]
+#                                  the autopilot's FRs; session = its session id
+#   fr.sh pipeline [--no-fetch] [--wait <s> [--max <s>]]
+#                                  per queued FR: phase, next action, detail
+#   fr.sh launch implement|fix|ship <ID> [--replace <session>]
+#   fr.sh launch autopilot         start a background session for the FR or the
+#                                  autopilot itself; prints the session id
+#   fr.sh fix-brief <ID>           what the next fix session is to fix
 #   fr.sh hook setup|teardown <ID> <path>
 #                                  the profile's worktree_setup / worktree_teardown
 #                                  in that worktree, the FR in its environment;
@@ -555,7 +564,7 @@ cmd_overlap() {
   local ids="" a
   for a in "$@"; do [ "$a" = "--no-fetch" ] || ids="$ids $a"; done
   want_fetch "$@"
-  ROWS=$(rows)
+  [ -n "${ROWS:-}" ] || ROWS=$(rows)
   local running cands shared id row
   running=$(printf '%s\n' "$ROWS" | awk -F '\t' '$2 == "in-progress" { print $1 }')
   if [ -z "$ids" ]; then
@@ -662,7 +671,7 @@ cmd_lock() {
 # (--url --field --value), which gh has since 2.97. Best effort by design: the
 # board never stops a skill — exit 5 when the status could not be written, the
 # reason on stderr, and the skill mentions it in its report.
-PS_EVENTS='defined input running failed blocked approval done'
+PS_EVENTS='defined input running implemented failed blocked approval done'
 GH_MIN=2.97
 
 gh_version() { gh --version 2>/dev/null | awk 'NR == 1 { print $3 }' || true; }
@@ -692,13 +701,19 @@ project_lookup() {
 }
 
 cmd_project_status() {
-  [ $# -eq 2 ] || die "usage: fr.sh project-status <issue> <event>"
-  local ref event="$2" map title field owner url value out num ver
+  [ $# -eq 2 ] || [ $# -eq 3 ] || die "usage: fr.sh project-status <issue> <event> [<gate>]"
+  local ref event="$2" gate="${3:-}" map title field owner url value out num ver
   case " $PS_EVENTS " in
     *" $event "*) ;;
     *) die "unknown event '$event' — one of: $PS_EVENTS" ;;
   esac
+  if [ -n "$gate" ] && ! printf '%s' "$gate" | grep -qE '^[a-z][a-z0-9-]*$'; then
+    die "gate must be one lowercase word, e.g. ci — got '$gate'"
+  fi
   ref=$(issue_ref "$1")
+  # the local log first: the autopilot reads it, the board may be off or fail
+  log_line "$PREFIX-${ref##*#}" "event $event${gate:+ $gate}" ||
+    echo "fr.sh: warning: event not recorded in the local FR log" >&2
   map=$(cfg project_status "")
   if [ -z "$map" ]; then echo "project status: not configured (no project_status in the profile)"; return 0; fi
   title=$(cfg project "")
@@ -861,6 +876,423 @@ cmd_hook() {
   fi
 }
 
+# --- autopilot ----------------------------------------------------------------
+#
+# The autopilot drives the FRs in its queue through start → implement → ship,
+# runs the opt-in fix loop (`fix_loop`) and starts the next wave after a merge.
+# `pipeline` decides; `launch` starts the sessions. Phases are derived from what
+# fr.sh derives anyway — FR doc, branch, worktree lock, PR and checks — plus two
+# facts neither git nor GitHub has: the events the sessions reported (written by
+# project-status) and the sessions the autopilot launched. Both are appended to
+# a log per FR in the git dir that all worktrees of this clone share, like the
+# ship lock: a record of what happened here, never a source of truth.
+
+CLAUDE_BIN=${FR_CLAUDE:-claude}
+
+state_dir() {
+  local d
+  d="$(cd "$(git rev-parse --git-common-dir)" && pwd)/fr-workflow"
+  mkdir -p "$d" && echo "$d"
+}
+
+log_line() { printf '%s %s\n' "$(date -u +%s)" "$2" >> "$(state_dir)/$1.log"; }
+
+fr_id() { local r; r=$(issue_ref "$1"); echo "$PREFIX-${r##*#}"; }
+
+# Facts from an FR's log, tab-separated: line of the last event, the event, its
+# gate; line of the last launch, its kind, its session; fix launches; time of
+# the last `approval`. Line numbers, not times, decide what came last.
+log_facts() {
+  local f; f="$(state_dir)/$1.log"
+  [ -f "$f" ] || { printf '0\t-\t-\t0\t-\t-\t0\t0\n'; return 0; }
+  awk '
+    BEGIN { el = 0; ev = "-"; eg = "-"; ll = 0; lk = "-"; ls = "-"; nf = 0; ap = 0 }
+    $2 == "event"  { el = NR; ev = $3; eg = ($4 == "" ? "-" : $4); if ($3 == "approval") ap = $1 }
+    $2 == "launch" { ll = NR; lk = $3; ls = ($4 == "" ? "-" : $4); if ($3 == "fix") nf++ }
+    END { printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", el, ev, eg, ll, lk, ls, nf, ap }' "$f"
+}
+
+# log_facts into the variables el ev eg ll lk ls nf ap of the caller
+read_facts() {
+  local facts; facts=$(log_facts "$1")
+  el=$(printf '%s' "$facts" | cut -f1); ev=$(printf '%s' "$facts" | cut -f2); eg=$(printf '%s' "$facts" | cut -f3)
+  ll=$(printf '%s' "$facts" | cut -f4); lk=$(printf '%s' "$facts" | cut -f5); ls=$(printf '%s' "$facts" | cut -f6)
+  nf=$(printf '%s' "$facts" | cut -f7); ap=$(printf '%s' "$facts" | cut -f8)
+}
+
+# "path<TAB>lock reason" of the worktree that has <branch> checked out
+wt_of() {
+  git worktree list --porcelain | awk -v b="refs/heads/$1" '
+    function out() { if (br == b && !f) { print p "\t" lk; f = 1 } }
+    /^worktree / { out(); p = substr($0, 10); br = ""; lk = ""; next }
+    /^branch /   { br = substr($0, 8); next }
+    /^locked/    { lk = substr($0, 8); if (lk == "") lk = "locked"; next }
+    END          { out() }'
+}
+
+# A Claude session holds the worktree: Claude Code locks it with a reason that
+# names the pid. A lock whose pid is gone is stale — no session. A lock without
+# a pid counts as held: never start a second session beside an unknown one.
+held() { # <lock reason>
+  local pid
+  [ -n "$1" ] || return 1
+  pid=$(printf '%s' "$1" | sed -n 's/.*pid \([0-9][0-9]*\).*/\1/p')
+  [ -n "$pid" ] || return 0
+  kill -0 "$pid" 2>/dev/null
+}
+
+queue_file() { echo "$(state_dir)/autopilot.queue"; }
+queue_ids() { local q; q=$(queue_file); if [ -f "$q" ]; then cat "$q"; fi; }
+
+cmd_queue() {
+  local sub="${1:-list}" q a id
+  [ $# -gt 0 ] && shift
+  q=$(queue_file)
+  case "$sub" in
+    add)
+      [ $# -gt 0 ] || die "usage: fr.sh queue add <ID>..."
+      for a in "$@"; do
+        id=$(fr_id "$a")
+        if [ -f "$q" ] && grep -qxF "$id" "$q"; then continue; fi
+        echo "$id" >> "$q"
+      done
+      queue_ids ;;
+    rm)
+      [ $# -gt 0 ] || die "usage: fr.sh queue rm <ID>..."
+      for a in "$@"; do
+        id=$(fr_id "$a")
+        [ -f "$q" ] || break
+        grep -vxF "$id" "$q" > "$q.tmp" || true
+        mv "$q.tmp" "$q"
+      done
+      queue_ids ;;
+    clear) rm -f "$q" "$(state_dir)/autopilot.seen" ;;
+    list) queue_ids ;;
+    session) if [ -f "$(state_dir)/autopilot.session" ]; then cat "$(state_dir)/autopilot.session"; fi ;;
+    *) die "usage: fr.sh queue add|rm|list|clear|session [<ID>...]" ;;
+  esac
+}
+
+# A profile list "[a, b]" as one item per line — only the outer brackets go,
+# a bot's name keeps its own: [claude[bot]] is claude[bot]
+cfg_list() {
+  cfg "$1" "" | sed 's/^[[:space:]]*\[//; s/\][[:space:]]*$//' | tr ',' '\n' |
+    sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | awk 'NF'
+}
+
+fix_allows() { # <checks|comments>
+  case "$(cfg fix_loop off)" in
+    checks) [ "$1" = checks ] ;;
+    checks+comments|comments+checks) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The open PR of an FR branch — the FR doc's `pr` is committed only at the end
+# of ship — else the doc's.
+pr_of() { # <branch> <doc pr>
+  local n
+  n=$(gh pr list -R "$(cur_repo)" --head "$1" --state open --json number --jq '.[0].number // empty' 2>/dev/null) || n=""
+  if [ -n "$n" ]; then echo "$n"; else echo "$2"; fi
+}
+
+# One PR as lines: "pr state mergeable mergeStateStatus", "check name
+# fail|pending|pass", "comment epoch association login url" — comments, and
+# reviews that say something (a body, or changes requested).
+J_PR='"pr\t\(.state)\t\(.mergeable)\t\(.mergeStateStatus)",
+  (.statusCheckRollup[]? | "check\t\((.name // .context // "?") | gsub("\t"; " "))\t\(
+     if ((.conclusion // .state // "") | IN("FAILURE","ERROR","TIMED_OUT","CANCELLED","ACTION_REQUIRED","STARTUP_FAILURE")) then "fail"
+     elif ((.status // "") | IN("QUEUED","IN_PROGRESS","PENDING","WAITING","REQUESTED")) or ((.state // "") == "PENDING") then "pending"
+     else "pass" end)"),
+  (.comments[]? | "comment\t\(.createdAt | fromdateiso8601)\t\(.authorAssociation)\t\(.author.login)\t\(.url)"),
+  (.reviews[]? | select(.submittedAt != null and (.state == "CHANGES_REQUESTED" or (.body // "") != ""))
+     | "comment\t\(.submittedAt | fromdateiso8601)\t\(.authorAssociation)\t\(.author.login)\treview \(.state)")'
+
+pr_facts() { gh pr view "$1" -R "$(cur_repo)" --json state,mergeable,mergeStateStatus,statusCheckRollup,comments,reviews --jq "$J_PR"; }
+
+# Failing checks of the PR facts on stdin: "skip<TAB>name" for those in
+# fix_skip_checks (they always stop), "fix<TAB>name" for the others.
+failing_checks() {
+  awk -F '\t' -v skip="$(cfg_list fix_skip_checks | tr '\n' '\037')" '
+    BEGIN { n = split(skip, s, "\037"); for (i = 1; i <= n; i++) if (s[i] != "") S[tolower(s[i])] = 1 }
+    $1 == "check" && $3 == "fail" { print ((tolower($2) in S) ? "skip" : "fix") "\t" $2 }'
+}
+
+# Comments after <epoch> by someone with write access to the repository, or by
+# a bot named in fix_comment_bots: "login<TAB>url". Everyone else's comment is
+# ignored — it is never an instruction to a session.
+trusted_comments() { # <epoch>  (PR facts on stdin)
+  awk -F '\t' -v since="$1" -v bots="$(cfg_list fix_comment_bots | tr '\n' '\037')" '
+    function bare(x) { x = tolower(x); sub(/^app\//, "", x); sub(/\[bot\]$/, "", x); return x }
+    BEGIN { n = split(bots, b, "\037"); for (i = 1; i <= n; i++) if (b[i] != "") B[bare(b[i])] = 1 }
+    $1 == "comment" && $2 + 0 > since + 0 &&
+      ($3 == "OWNER" || $3 == "MEMBER" || $3 == "COLLABORATOR" || (bare($4) in B)) { print $4 "\t" $5 }'
+}
+
+# The verdict on a gate a fix session could address: "fix" or "report", and why
+fix_verdict() { # <what> <class> <nf>
+  local max; max=$(cfg fix_attempts 2)
+  if ! fix_allows "$2"; then printf 'report\t%s (fix_loop: %s)\n' "$1" "$(cfg fix_loop off)"
+  elif [ "$3" -ge "$max" ]; then printf 'report\t%s, fix attempts used up (%s/%s)\n' "$1" "$3" "$max"
+  else printf 'fix\t%s, attempt %s/%s\n' "$1" "$(($3 + 1))" "$max"; fi
+}
+
+# "phase<TAB>action<TAB>detail" of one FR — the heart of the autopilot.
+# Actions: start, ship, fix, report, wait, none.
+phase_of() { # <row> <wave> <conflicts>
+  local id status loc ref docpr el ev eg ll lk ls nf ap wt reason live pr facts fails skips cmts
+  id=$(printf '%s' "$1" | cut -f1); status=$(printf '%s' "$1" | cut -f2)
+  loc=$(printf '%s' "$1" | cut -f3); ref=$(printf '%s' "$1" | cut -f4); docpr=$(printf '%s' "$1" | cut -f6)
+  read_facts "$id"
+  case "$status" in
+    merged)  printf 'merged\tnone\t\n'; return 0 ;;
+    dropped) printf 'dropped\tnone\t\n'; return 0 ;;
+    open)
+      if [ "$ev" = input ]; then printf 'waiting\treport\tthe start needs your decision: /fr-workflow:start %s\n' "$id"
+      elif [ "$2" = 1 ]; then printf 'queued\tstart\t\n'
+      else printf 'queued\twait\twave %s: %s\n' "${2:-?}" "${3:-}"; fi
+      return 0 ;;
+    in-progress|in-review) ;;
+    *) printf 'unknown\treport\tstatus %s\n' "$status"; return 0 ;;
+  esac
+  live=0
+  if [ "$loc" = branch ]; then
+    wt=$(wt_of "$ref"); reason=$(printf '%s' "$wt" | cut -f2)
+    if [ -n "$wt" ] && held "$reason"; then live=1; fi
+  fi
+  # a launch after the last event: that session has not reported yet
+  if [ "$ll" -gt "$el" ]; then
+    if [ "$live" = 1 ]; then
+      if [ "$lk" = ship ]; then printf 'shipping\tnone\t%s\n' "$ls"; else printf 'implementing\tnone\t%s %s\n' "$lk" "$ls"; fi
+    else
+      printf 'stalled\treport\tthe %s session %s ended without a result: claude logs %s\n' "$lk" "$ls" "$ls"
+    fi
+    return 0
+  fi
+  case "$ev" in
+    # the detail changes when the session holding the worktree ends: a launch
+    # refused for it is retried once the user closed it
+    implemented)
+      if [ "$live" = 1 ]; then printf 'implemented\tship\ta session still holds the worktree\n'
+      else printf 'implemented\tship\t\n'; fi
+      return 0 ;;
+    input)   printf 'waiting\treport\t%s: claude attach %s\n' "$eg" "$ls"; return 0 ;;
+    blocked) printf 'blocked\treport\t%s\n' "$eg"; return 0 ;;
+    failed)
+      if [ "$eg" = checks ] || [ "$eg" = ci ]; then
+        skips=""
+        if [ "$eg" = ci ]; then
+          pr=$(pr_of "$ref" "$docpr")
+          if [ -n "$pr" ] && facts=$(pr_facts "$pr" 2>/dev/null); then
+            skips=$(printf '%s\n' "$facts" | failing_checks | awk -F '\t' '$1 == "skip" { print $2 }' | paste -sd ',' -)
+          fi
+        fi
+        if [ -n "$skips" ]; then printf 'failed\treport\tci: %s never goes to the fix loop\n' "$skips"
+        else printf 'failed\t%s\n' "$(fix_verdict "$eg" checks "$nf")"; fi
+      else
+        printf 'failed\treport\t%s\n' "$eg"
+      fi
+      return 0 ;;
+  esac
+  if [ "$live" = 1 ]; then
+    if [ "$lk" = ship ]; then printf 'shipping\tnone\t\n'; else printf 'implementing\tnone\t\n'; fi
+    return 0
+  fi
+  if [ "$status" = in-progress ]; then
+    printf 'stalled\treport\tno session holds the worktree and none reported a result\n'; return 0
+  fi
+  # in review: the PR decides — merged soon, conflicting, red, or commented on
+  pr=$(pr_of "$ref" "$docpr")
+  [ -n "$pr" ] || { printf 'review\treport\tin-review without an open PR\n'; return 0; }
+  facts=$(pr_facts "$pr" 2>/dev/null) || { printf 'review\twait\tPR #%s not readable\n' "$pr"; return 0; }
+  case "$(printf '%s\n' "$facts" | awk -F '\t' '$1 == "pr" { print $2 "/" $3 }')" in
+    MERGED/*) printf 'review\twait\tPR #%s merged, waiting for the base branch\n' "$pr"; return 0 ;;
+    CLOSED/*) printf 'review\treport\tPR #%s closed without merge\n' "$pr"; return 0 ;;
+    */CONFLICTING) printf 'review\tship\tPR #%s conflicts with the base branch\n' "$pr"; return 0 ;;
+  esac
+  fails=$(printf '%s\n' "$facts" | failing_checks)
+  if [ -n "$fails" ]; then
+    skips=$(printf '%s\n' "$fails" | awk -F '\t' '$1 == "skip" { print $2 }' | paste -sd ',' -)
+    fails=$(printf '%s\n' "$fails" | cut -f2 | paste -sd ',' -)
+    if [ -n "$skips" ]; then printf 'review\treport\tPR #%s red: %s, never to the fix loop\n' "$pr" "$skips"
+    else printf 'review\t%s\n' "$(fix_verdict "PR #$pr red: $fails" checks "$nf")"; fi
+    return 0
+  fi
+  if [ "$ap" != 0 ]; then
+    cmts=$(printf '%s\n' "$facts" | trusted_comments "$ap" | cut -f1 | sort -u | paste -sd ',' -)
+    if [ -n "$cmts" ]; then
+      printf 'review\t%s\n' "$(fix_verdict "PR #$pr: comments by $cmts" comments "$nf")"; return 0
+    fi
+  fi
+  printf 'review\tnone\tPR #%s waits for your merge\n' "$pr"
+}
+
+pipeline_once() {
+  local ids open ov id row wave conf active limit ph
+  ids=$(queue_ids)
+  printf 'id\tphase\taction\tdetail\n'
+  [ -n "$ids" ] || return 0
+  ROWS=$(rows)
+  open=$(for id in $ids; do printf '%s\n' "$ROWS" | awk -F '\t' -v id="$id" '$1 == id && $2 == "open" { print id }'; done)
+  ov=""
+  if [ -n "$open" ]; then ov=$(cmd_overlap $open --no-fetch 2>/dev/null) || ov=""; fi
+  ph=$(for id in $ids; do
+    row=$(printf '%s\n' "$ROWS" | awk -F '\t' -v id="$id" '$1 == id')
+    if [ -z "$row" ]; then printf '%s\tunknown\treport\tno open FR issue and no FR doc\n' "$id"; continue; fi
+    wave=$(printf '%s\n' "$ov" | awk -F '\t' -v id="$id" '$1 == "wave" && $3 == id { print $2 }')
+    conf=$(printf '%s\n' "$ov" | awk -F '\t' -v id="$id" '
+      $1 == "conflict" && ($2 == id || $3 == id) { o = ($2 == id ? $3 : $2); s = s (s == "" ? "" : "; ") o " " $4 }
+      END { print s }')
+    printf '%s\t%s\n' "$id" "$(phase_of "$row" "$wave" "$conf")"
+  done)
+  # at most autopilot_sessions FR sessions at a time; starts beyond it wait
+  limit=$(cfg autopilot_sessions 3)
+  active=$(printf '%s\n' "$ph" | awk -F '\t' '$2 == "implementing" || $2 == "shipping" || $3 == "ship" || $3 == "fix" { n++ } END { print n + 0 }')
+  printf '%s\n' "$ph" | awk -F '\t' -v free=$((limit - active)) 'BEGIN { OFS = "\t" }
+    $3 == "start" { if (free > 0) free--; else { $3 = "wait"; $4 = "session limit (autopilot_sessions)" } }
+    { print }'
+}
+
+# --wait <s>: block until the result differs from the one the autopilot saw
+# last, checking every <s> seconds (fetch included); --max <s> ends the wait
+# anyway. The autopilot wakes for changes, not for every check.
+cmd_pipeline() {
+  local wait="" max=0 nofetch="" out seen t0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --no-fetch) nofetch=1 ;;
+      --wait) wait="${2:-}"; shift ;;
+      --max) max="${2:-}"; shift ;;
+      *) die "usage: fr.sh pipeline [--no-fetch] [--wait <s> [--max <s>]]" ;;
+    esac
+    shift
+  done
+  [ -z "$wait" ] || printf '%s' "$wait" | grep -qE '^[0-9]+$' || die "--wait needs seconds"
+  printf '%s' "$max" | grep -qE '^[0-9]+$' || die "--max needs seconds"
+  [ -n "$nofetch" ] || do_fetch
+  if [ -z "$wait" ]; then pipeline_once; return 0; fi
+  seen="$(state_dir)/autopilot.seen"; t0=$(date -u +%s)
+  while :; do
+    out=$(pipeline_once)
+    if [ ! -f "$seen" ] || [ "$out" != "$(cat "$seen")" ]; then break; fi
+    if [ "$max" -gt 0 ] && [ $(( $(date -u +%s) - t0 + wait )) -gt "$max" ]; then break; fi
+    sleep "$wait"
+    [ -n "$nofetch" ] || do_fetch
+  done
+  printf '%s\n' "$out" > "$seen"
+  printf '%s\n' "$out"
+}
+
+# The session id `claude --bg` prints: the first token of its output that looks
+# like one — six or more letters, digits, - or _, at least one digit.
+bg_session_id() { tr -s ' \t\r' '\n' | tr -d '.,;:()[]`' | grep -E '^[A-Za-z0-9][A-Za-z0-9_-]{5,}$' | grep '[0-9]' | head -n 1; }
+
+main_worktree() { git worktree list --porcelain | sed -n '1s/^worktree //p'; }
+
+launch_autopilot() {
+  local out sid
+  cd "$(main_worktree)"
+  out=$("$CLAUDE_BIN" --bg -n fr-autopilot --model "$(cfg autopilot_model sonnet)" \
+    --effort "$(cfg autopilot_effort medium)" '/fr-workflow:autopilot --loop' 2>&1) || { printf '%s\n' "$out" >&2; exit 1; }
+  sid=$(printf '%s\n' "$out" | bg_session_id)
+  [ -n "$sid" ] || { printf '%s\n' "$out" >&2; die "no session id in the output of claude --bg"; }
+  printf '%s\n' "$sid" > "$(state_dir)/autopilot.session"
+  echo "launched autopilot as $sid (fr-autopilot)"
+}
+
+# One background session for a started FR, in its worktree, with the model the
+# kind calls for. The prompt is a fixed slash command — no text from the issue.
+cmd_launch() {
+  [ $# -ge 1 ] || die "usage: fr.sh launch implement|fix|ship <ID> [--replace <session>] | fr.sh launch autopilot"
+  local kind="$1" id row status loc ref title model effort wt name reason stop n sname prompt out sid i
+  local el ev eg ll lk ls nf ap
+  shift
+  if [ "$kind" = autopilot ]; then launch_autopilot; return 0; fi
+  case "$kind" in implement|fix|ship) ;; *) die "unknown launch '$kind': implement, fix, ship or autopilot" ;; esac
+  [ $# -ge 1 ] || die "usage: fr.sh launch $kind <ID> [--replace <session>]"
+  id=$(fr_id "$1"); shift
+  stop=""
+  if [ "${1:-}" = --replace ]; then stop="${2:-}"; [ -n "$stop" ] || die "--replace needs a session id"; fi
+  row=$(rows | awk -F '\t' -v id="$id" '$1 == id')
+  [ -n "$row" ] || die "no such FR: $id"
+  status=$(printf '%s' "$row" | cut -f2); loc=$(printf '%s' "$row" | cut -f3); ref=$(printf '%s' "$row" | cut -f4)
+  case "$status" in in-progress|in-review) ;; *) die "$id is $status: only a started FR gets a session" ;; esac
+  [ "$loc" = branch ] || die "$id is not on its FR branch here (location $loc)"
+  wt=$(wt_of "$ref")
+  [ -n "$wt" ] || die "no worktree of $ref on this machine: /fr-workflow:start $id prepares it"
+  name=$(basename "$(printf '%s' "$wt" | cut -f1)"); reason=$(printf '%s' "$wt" | cut -f2)
+  if [ "$kind" = ship ]; then
+    model=$(cfg ship_model opus); effort=$(cfg ship_effort high)
+  else
+    model=$(printf '%s' "$row" | cut -f11); effort=$(printf '%s' "$row" | cut -f12)
+    [ -n "$model" ] || model=$(cfg impl_model opus)
+    [ -n "$effort" ] || effort=$(cfg impl_effort high)
+  fi
+  read_facts "$id"
+  n=$((nf + 1))
+  if [ "$kind" = fix ] && [ "$n" -gt "$(cfg fix_attempts 2)" ]; then
+    echo "fr.sh: $id has used its $(cfg fix_attempts 2) fix attempts" >&2; exit 3
+  fi
+  # one session per worktree: a live one is stopped first — the autopilot's own,
+  # or the one named with --replace; an unknown one is never touched
+  if held "$reason"; then
+    [ -n "$stop" ] || { [ "$ls" = "-" ] || stop=$ls; }
+    if [ -z "$stop" ]; then
+      echo "fr.sh: a session the autopilot did not start holds $name ($reason): end it, or pass its id from 'claude agents' with --replace" >&2
+      exit 3
+    fi
+    "$CLAUDE_BIN" stop "$stop" >/dev/null 2>&1 || die "cannot stop session $stop"
+    i=0
+    while held "$(wt_of "$ref" | cut -f2)"; do
+      i=$((i + 1))
+      if [ "$i" -gt 30 ]; then echo "fr.sh: $name is still held after stopping $stop" >&2; exit 3; fi
+      sleep 1
+    done
+  fi
+  # the title comes from a customer-written issue: session name only, without
+  # quotes, backticks, $ or backslashes
+  title=$(printf '%s' "$row" | cut -f9 | tr -d "'\"\`\$\\\\" | cut -c1-60)
+  case "$kind" in
+    implement) sname="$id $title"; prompt="/fr-workflow:implement $id" ;;
+    fix)       sname="$id fix $n";  prompt="/fr-workflow:implement $id fix" ;;
+    ship)      sname="$id ship";    prompt="/fr-workflow:ship $id" ;;
+  esac
+  cd "$(main_worktree)"
+  out=$("$CLAUDE_BIN" -w "$name" --bg --model "$model" --effort "$effort" -n "$sname" "$prompt" 2>&1) ||
+    { printf '%s\n' "$out" >&2; exit 1; }
+  sid=$(printf '%s\n' "$out" | bg_session_id)
+  [ -n "$sid" ] || { printf '%s\n' "$out" >&2; die "no session id in the output of claude --bg"; }
+  log_line "$id" "launch $kind $sid"
+  echo "launched $kind $id as $sid ($sname, $model/$effort)"
+}
+
+# What the next fix session is to fix: the gate that stopped the ship, or the
+# red checks and the trusted comments on the PR since the last approval.
+cmd_fix_brief() {
+  [ $# -eq 1 ] || die "usage: fr.sh fix-brief <ID>"
+  local id row ref docpr pr facts el ev eg ll lk ls nf ap
+  id=$(fr_id "$1")
+  row=$(rows | awk -F '\t' -v id="$id" '$1 == id')
+  [ -n "$row" ] || die "no such FR: $id"
+  ref=$(printf '%s' "$row" | cut -f4); docpr=$(printf '%s' "$row" | cut -f6)
+  read_facts "$id"
+  echo "FR: $id   branch: $ref   attempt: $((nf + 1))/$(cfg fix_attempts 2)"
+  if [ "$ev" = failed ] && [ "$eg" = checks ]; then
+    echo "gate: local checks: the ship's *Local checks before commit* failed. Run them, fix what fails."
+    return 0
+  fi
+  pr=$(pr_of "$ref" "$docpr")
+  if [ -z "$pr" ]; then echo "gate: $ev $eg, no open PR"; return 0; fi
+  facts=$(pr_facts "$pr") || die "cannot read PR #$pr"
+  echo "PR: #$pr"
+  printf '%s\n' "$facts" | failing_checks | awk -F '\t' -v pr="$pr" '
+    $1 == "fix"  { print "red check: " $2 "   (gh pr checks " pr "; gh run view <run-id> --log-failed)" }
+    $1 == "skip" { print "red check, not for the fix loop: " $2 }'
+  if [ "$ap" != 0 ] && fix_allows comments; then
+    printf '%s\n' "$facts" | trusted_comments "$ap" | awk -F '\t' '{ print "comment by " $1 ": " $2 }'
+  fi
+}
+
 cmd_check() {
   local ok=1 repo project ver note
   # cur_repo exits its subshell on failure, so test the assignment itself
@@ -908,6 +1340,10 @@ case "$cmd" in
   lock) cmd_lock "$@" ;;
   project-status) cmd_project_status "$@" ;;
   project-options) cmd_project_options "$@" ;;
+  queue) cmd_queue "$@" ;;
+  pipeline) cmd_pipeline "$@" ;;
+  launch) cmd_launch "$@" ;;
+  fix-brief) cmd_fix_brief "$@" ;;
   hook) cmd_hook "$@" ;;
-  *) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

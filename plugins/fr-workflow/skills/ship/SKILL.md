@@ -37,12 +37,24 @@ step 6 — and **before stopping at any gate**, so other FRs are not blocked.
 **Board status** (`project_status` in the profile; `<issue>` is the FR doc's
 `issue`): `fr.sh project-status <issue> running` once step 0 passed. Whenever
 this skill **stops** before step 7, write why, in the same breath as the
-evidence: `failed` when a gate found a defect in the change — review or
-security findings under `stop`, a secret, red CI, a failed criterion; `blocked`
-when something outside the change holds it up — the lock, a deployment that
-does not come, a merge conflict that needs a decision; `input` when it stops
-with a question — unclear uncommitted changes, unverified criteria, a login
-wall. Exit 5 (not written) is a line in the report, never a reason to stop.
+evidence, with the gate as third argument — the autopilot reads it from the
+local FR log, and only `checks` and `ci` can enter its fix loop:
+
+| Event     | Gate         | When                                                    |
+| --------- | ------------ | ------------------------------------------------------- |
+| `failed`  | `review`     | code review findings under `stop`                       |
+| `failed`  | `security`   | security findings under `stop`                          |
+| `failed`  | `secret`     | a credential in the change                              |
+| `failed`  | `checks`     | the profile's local checks (step 1.7)                   |
+| `failed`  | `ci`         | red CI (step 3)                                         |
+| `failed`  | `acceptance` | a failed criterion                                      |
+| `blocked` | `lock`       | the ship lock                                           |
+| `blocked` | `deploy`     | a deployment that does not come                         |
+| `blocked` | `conflict`   | a merge conflict that needs a decision                  |
+| `input`   | `question`   | unclear uncommitted changes, unverified criteria, a login wall |
+
+e.g. `fr.sh project-status <issue> failed ci`. Exit 5 (not written) is a line
+in the report, never a reason to stop.
 
 ## 0. Preflight
 

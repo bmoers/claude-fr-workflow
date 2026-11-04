@@ -25,6 +25,9 @@ Focus: $ARGUMENTS
    (`.claude/worktrees/<id-lower>-…`) or its `name` starts with the FR id. Show
    its `status` and `kind`.
 4. **Parallel.** `fr.sh overlap --no-fetch` for all `open` and `in-progress` FRs.
+5. **Autopilot.** `fr.sh queue list` not empty → `fr.sh pipeline --no-fetch`,
+   and the autopilot session (id from `fr.sh queue session`) in the sessions of
+   step 3.
 
 Output:
 
@@ -34,6 +37,8 @@ Output:
   branch, or `local`) · session (name and state, or —).
 - Below: the requests to define, then which open FRs could start now alongside
   the running ones (wave 1), and the conflicts that hold the others back.
+- Autopilot: its session and state, then per queued FR phase, next action and
+  detail; the FRs in `report` first — they wait for the user.
 - If sessions run: `claude agents` (live view), `claude logs "<ID>"`,
   `claude attach "<ID>"`.
 - Inconsistencies: `in-review` without `pr`; an FR branch whose PR was closed

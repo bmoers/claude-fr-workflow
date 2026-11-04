@@ -259,6 +259,49 @@ prefer a version URL.
 get a smaller model or effort when they are defined; change *Model* and *Effort*
 in the issue's *Planning* before starting.
 
+## Autopilot: `/fr-workflow:autopilot #20 #21 #22 #23`
+
+Parallel sessions still need you at every hand-off: open the ship session when
+an implementation is done, start the next wave when a merge cleared the way. The
+autopilot takes those hand-offs over. You keep the merge.
+
+```
+/fr-workflow:autopilot #20 #21 #22 #23
+```
+
+It checks each FR, puts them in its queue and starts itself as the background
+session **fr-autopilot**. From then on, per FR:
+
+| When                                | It                                                                     |
+| ----------------------------------- | ---------------------------------------------------------------------- |
+| the FR is in wave 1                 | prepares it like `start` and starts its implementation session        |
+| the implementation session is done  | starts the ship session — `ship_model`, all gates                      |
+| a ship stops at a gate              | reports it — or, with `fix_loop`, starts a fix session (see below)     |
+| the PR is ready                     | waits for your merge                                                   |
+| you merged                          | starts the FRs that waited for this one                                |
+| the code moved since the definition | does not start the FR; you decide with `/fr-workflow:start`           |
+
+**Following it.** `/fr-workflow:autopilot status` shows every queued FR with its
+phase, the next action and what it waits for — the FRs waiting for you first.
+`claude logs fr-autopilot` is its own log, `claude agents` shows every session,
+and a session that asks something waits for `claude attach`. The board, if the
+project has one, moves as before. `/fr-workflow:autopilot stop` stops the
+autopilot; the sessions it started go on. No background session wanted:
+`/fr-workflow:autopilot --here #20 #21` runs it in your session.
+
+**Fix loop.** With `fix_loop: checks` in the profile, a red check — the local
+checks or CI — goes to a fresh implementation session instead of to you; with
+`checks+comments`, so do new review comments on the PR by your team or the bots
+you list. One fix session per attempt, at most `fix_attempts` per FR; each fix is
+committed locally, and a new ship session reviews and checks everything again
+before anything is pushed. Secrets, security findings, failed acceptance
+criteria and the checks in `fix_skip_checks` always come to you. See
+[the profile](profile.md#fix-loop).
+
+**Cost.** The autopilot itself is a cheap model that mostly waits: it wakes when
+something changed, not on every check. The FR sessions cost what they would cost
+by hand — at most `autopilot_sessions` of them at a time.
+
 ## What GitHub shows
 
 - **A request** lists its FRs as sub-issues, with a progress bar; an FR that
@@ -346,6 +389,8 @@ That is intended — the commit that gets merged must have green checks.
 ## What the plugin never does
 
 - merge a PR;
+- fix what one of its own gates found — only the autopilot's opt-in fix loop
+  does, in a fresh session, followed by a full new ship;
 - start or re-run a deployment;
 - touch production — unless you ask for one specific action;
 - push code that has not been through the code and security review;

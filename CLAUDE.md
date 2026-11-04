@@ -11,8 +11,8 @@ pitfalls that the code does not show.
   built-ins (`/code-review`, `/security-review`, worktrees, `claude agents`,
   `--bg`) over GitHub features (issue forms) over own code. Own code only where
   nothing equivalent exists — here `scripts/fr.sh` (FR list, FR doc from the
-  issue, the FRs of a request, overlap, lock, board status, worktree hooks), the
-  skill texts and the two review agents.
+  issue, the FRs of a request, overlap, lock, board status, worktree hooks, the
+  autopilot's pipeline and launches), the skill texts and the two review agents.
 - **Projects only get better, never worse.** Client repositories pin a tag. A
   change is released as a new tag, tested in the sandbox, and only then does a
   client's pin go up. Never move a pushed tag.
@@ -86,6 +86,24 @@ pitfalls that the code does not show.
   `claude rm` as well, which removes a finished session's worktree. A failed
   hook is `blocked`, never retried, never `--force`. Ignored files are invisible
   to the skills — the hooks' generated files belong in `.gitignore`.
+- **Autopilot** (0.6): the hand-offs between the sessions (implement → ship,
+  merge → next wave) are driven by `/fr-workflow:autopilot`, a background
+  session that decides with `fr.sh pipeline` and acts with `fr.sh launch`.
+  Deterministic parts live in `fr.sh`, testable with stub `gh` and `claude`; the
+  skill only executes actions. State is derived; the two facts git and GitHub
+  lack (what a session reported, which session the autopilot launched) go into
+  a local log per FR in the git common dir, like the ship lock. `launch` stops
+  only sessions it started or one named with `--replace`, and its prompts are
+  fixed slash commands: no issue text reaches a shell or a prompt.
+- **Fix loop** (0.6) reopens "no improvised fix loop" for one reason: routine
+  red checks and review comments cost a human round trip each. Bounded instead
+  of forbidden: opt-in `fix_loop` (default `off`), `fix_attempts`, a fresh
+  implementation session per attempt (the session that judges is still never
+  the one that wrote the code), a full new ship after every fix. Never in the
+  loop: secrets, security findings, review findings under `stop`, acceptance,
+  deployments, conflicts, `fix_skip_checks`. PR comments only from
+  `OWNER`/`MEMBER`/`COLLABORATOR` or listed bots, since on a public repository
+  comments are an injection channel. The skills' own gates still never fix.
 - Playwright MCP stays on `@latest` — maintained by Microsoft; accepted trade-off.
 - Jira is not implemented — FRs are GitHub issues. When needed, via Atlassian's
   official MCP server, not own code.
@@ -162,7 +180,8 @@ a new session there.
   (`project-options`), the language of what goes to GitHub, first end-to-end
   run of 0.5 with the board · 0.5.2 `implement`, the pin procedure · 0.5.3 the
   ship session's own model, agents on `opus` · 0.5.4 worktree hooks
-  (`worktree_setup` / `worktree_teardown`, `fr.sh hook`). Details:
+  (`worktree_setup` / `worktree_teardown`, `fr.sh hook`) · 0.6 autopilot,
+  opt-in fix loop. Details:
   [CHANGELOG.md](CHANGELOG.md).
 - Before 0.3.0, three `/code-review` rounds found 37, 23 and 19 issues. Recurring
   bug classes: `set -e` exit codes, git path quoting, ref normalization, branch

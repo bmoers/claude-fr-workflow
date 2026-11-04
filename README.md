@@ -12,6 +12,7 @@ flowchart LR
   P -->|"ship"| S["review · PR · CI ·<br/>test deploy · acceptance"]
   S -->|"you merge"| M["merged"]
   M -->|"done"| C["requests closed<br/>when fully served"]
+  M -.->|"autopilot: next wave"| P
 ```
 
 | Command                  | Does                                                                                                                                       |
@@ -23,6 +24,7 @@ flowchart LR
 | `/fr-workflow:ship`      | finish: code and security review → PR → CI → test deployment → acceptance check → result into the FR document                              |
 | `/fr-workflow:done`      | after the merge — or to drop an FR: close fully served requests (asks first), clean up                                                     |
 | `/fr-workflow:status`    | overview of all FRs with their sessions, the requests still to define, and which FRs can run in parallel                                   |
+| `/fr-workflow:autopilot` | drives queued FRs through start, implement and ship in the background: next wave after each merge, optional fix loop; you merge            |
 
 ## Documentation
 
@@ -62,6 +64,12 @@ flowchart LR
   branch and skip its release. A build from the first push of an FR branch, which
   holds only the FR document, is avoided with `paths-ignore` on push triggers,
   which `init` proposes.
+- **The autopilot drives, it does not judge.** It starts sessions and reads their
+  results from `fr.sh pipeline`: derived state plus a local log of what the
+  sessions reported. The fix loop is opt-in (`fix_loop`), bounded
+  (`fix_attempts`), uses a fresh session per attempt, and every fix goes through
+  a full new ship. Secrets, security findings and failed acceptance criteria
+  never enter it; PR comments count only from authors with write access.
 - **Hard limits:** never merges, never triggers deployments, never touches
   production, never handles credentials.
 
@@ -77,7 +85,7 @@ plugins/fr-workflow/
   skills/<command>/SKILL.md         one folder per command
   agents/                           reviewer agents for ship, adapted from pr-review-toolkit (Apache-2.0)
   reference/model.md                model and rules, read by every command
-  scripts/fr.sh                     deterministic part: FR list, FR doc from the issue, FRs of a request, overlap, lock, board status, worktree hooks
+  scripts/fr.sh                     deterministic part: FR list, FR doc from the issue, FRs of a request, overlap, lock, board status, worktree hooks, autopilot pipeline and launches
   templates/                        FR issue, profile, issue form, FR folder README
 docs/                               user documentation
 tests/fr-sh.sh                      regression suite for scripts/fr.sh
