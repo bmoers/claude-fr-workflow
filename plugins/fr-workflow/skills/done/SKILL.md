@@ -91,7 +91,7 @@ by `drop`.
      anything removes the worktree**: `claude rm` deletes a finished session's
      worktree too, and a stack still running on a removed worktree keeps its
      ports and volumes. Exit 6 → show the output, keep the worktree,
-     `fr.sh project-status <ID> blocked`, and **stop here** — no step 3: the
+     `fr.sh project-status <ID> blocked teardown`, and **stop here** — no step 3: the
      board must not say `done` while the stack is up. The user looks at it and
      runs `done` again; issues already closed stay closed, the teardown runs
      again. Worktree already gone (a `claude rm` or a `git worktree remove` by

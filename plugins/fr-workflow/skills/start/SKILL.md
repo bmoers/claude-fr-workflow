@@ -71,7 +71,7 @@ once the conflicting FR is merged — or now, if the user accepts the overlap.
    `worktree_setup`, when it has one (*Worktree hooks* in the model): a dev
    stack for this worktree, dependencies, an `.env`. Exit 6 → the hook failed:
    show its output, leave branch and worktree as they are,
-   `fr.sh project-status <issue> blocked`, and this FR is finished for this
+   `fr.sh project-status <issue> blocked setup`, and this FR is finished for this
    run — skip step 6 and section 5 for it (`blocked` must stay on the board);
    the user decides, and `/fr-workflow:start <ID>` resumes it and runs the hook
    again. Keep the hook's last lines for the hand-over.
@@ -93,7 +93,7 @@ once the conflicting FR is merged — or now, if the user accepts the overlap.
 4. `fr.sh hook setup <ID> <worktree path>` — `worktree_setup` runs on a resume
    too, whether the worktree is new or was there (idempotent by contract: a
    stack that is up stays up, one gone after a reboot comes back). Exit 6 → as
-   above: output, `blocked`, and skip step 5 and section 5 for this FR.
+   above: output, `blocked setup`, and skip step 5 and section 5 for this FR.
 5. `fr.sh project-status <issue> running` — a resumed FR is running again; the
    board column is not a git change.
 

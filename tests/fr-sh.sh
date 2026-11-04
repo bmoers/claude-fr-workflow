@@ -489,6 +489,18 @@ stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tNONE\t
 check "pipeline: a listed bot's review, checks+comments → fix" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	fix	PR #92: comments by app/claude, attempt 1/2"' "$("$FR" pipeline --no-fetch 2>&1)"
 "$FR" fix-brief 72 > "$SP/fb.out" 2>&1
 check "fix-brief: lists the trusted comments" 'grep -q "^comment by app/claude: review CHANGES_REQUESTED" "$SP/fb.out"' "$(cat "$SP/fb.out")"
+check "pr_of: asks only for PRs of this repository, not of forks" 'grep -q "^pr list -R acme/ap --head feat/fr-72-b --state open --json number,isCrossRepository " "$STUB_LOG"' "$(grep "^pr list" "$STUB_LOG" | tail -1)"
+# the fix loop's settings come from the main checkout's profile, also when
+# fr.sh runs inside a worktree whose branch carries another profile
+printf -- '---\nfix_loop: off\n---\n' > .claude/worktrees/fr-70-a/.claude/workflow.md
+(cd .claude/worktrees/fr-70-a && "$FR" fix-brief 72) > "$SP/fb.out" 2>&1
+check "fix-brief from inside a worktree: settings from the main checkout's profile" 'grep -q "^comment by app/claude: review CHANGES_REQUESTED" "$SP/fb.out"' "$(cat "$SP/fb.out")"
+git -C .claude/worktrees/fr-70-a checkout -q -- .claude/workflow.md
+# a plain login never matches a listed bot, however it is spelled
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tNONE\tclaude\thttps://x/4\ncomment\t4102444800\tNONE\tClaude-Bot\thttps://x/5')"
+check "pipeline: a user named like a listed bot is not trusted" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	none	PR #92 waits for your merge"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tNONE\tClaude[bot]\thttps://x/6')"
+check "pipeline: the bot form matches regardless of case" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	fix	PR #92: comments by Claude\[bot\], attempt 1/2"' "$("$FR" pipeline --no-fetch 2>&1)"
 stub prview "$(printf 'pr\tOPEN\tCONFLICTING\tDIRTY')"
 check "pipeline: a conflicting PR → ship again" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	ship	PR #92 conflicts"' "$("$FR" pipeline --no-fetch 2>&1)"
 stub prview "$(printf 'pr\tCLOSED\tUNKNOWN\tUNKNOWN')"

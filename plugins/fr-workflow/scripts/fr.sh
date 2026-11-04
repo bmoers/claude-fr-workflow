@@ -992,7 +992,9 @@ fix_allows() { # <checks|comments>
 # of ship — else the doc's.
 pr_of() { # <branch> <doc pr>
   local n
-  n=$(gh pr list -R "$(cur_repo)" --head "$1" --state open --json number --jq '.[0].number // empty' 2>/dev/null) || n=""
+  # only PRs from this repository: a fork may name its branch like ours
+  n=$(gh pr list -R "$(cur_repo)" --head "$1" --state open --json number,isCrossRepository \
+    --jq '[.[] | select(.isCrossRepository | not)][0].number // empty' 2>/dev/null) || n=""
   if [ -n "$n" ]; then echo "$n"; else echo "$2"; fi
 }
 
@@ -1024,9 +1026,12 @@ failing_checks() {
 trusted_comments() { # <epoch>  (PR facts on stdin)
   awk -F '\t' -v since="$1" -v bots="$(cfg_list fix_comment_bots | tr '\n' '\037')" '
     function bare(x) { x = tolower(x); sub(/^app\//, "", x); sub(/\[bot\]$/, "", x); return x }
+    # an author counts as a listed bot only in bot form, app/<name> or
+    # <name>[bot]: a plain login never matches, whatever it is called
+    function isbot(x) { x = tolower(x); return x ~ /^app\// || x ~ /\[bot\]$/ }
     BEGIN { n = split(bots, b, "\037"); for (i = 1; i <= n; i++) if (b[i] != "") B[bare(b[i])] = 1 }
     $1 == "comment" && $2 + 0 > since + 0 &&
-      ($3 == "OWNER" || $3 == "MEMBER" || $3 == "COLLABORATOR" || (bare($4) in B)) { print $4 "\t" $5 }'
+      ($3 == "OWNER" || $3 == "MEMBER" || $3 == "COLLABORATOR" || (isbot($4) && (bare($4) in B))) { print $4 "\t" $5 }'
 }
 
 # The verdict on a gate a fix session could address: "fix" or "report", and why
@@ -1158,6 +1163,9 @@ pipeline_once() {
 # anyway. The autopilot wakes for changes, not for every check.
 cmd_pipeline() {
   local wait="" max=0 nofetch="" out seen t0
+  # the autopilot's settings come from the main checkout's profile — the base
+  # branch's — wherever this runs; never from the copy on an FR branch
+  local PROFILE="$(main_worktree)/$PROFILE"
   while [ $# -gt 0 ]; do
     case "$1" in
       --no-fetch) nofetch=1 ;;
@@ -1206,6 +1214,7 @@ cmd_launch() {
   [ $# -ge 1 ] || die "usage: fr.sh launch implement|fix|ship <ID> [--replace <session>] | fr.sh launch autopilot"
   local kind="$1" id row status loc ref title model effort wt name reason stop n sname prompt out sid i
   local el ev eg ll lk ls nf ap
+  local PROFILE="$(main_worktree)/$PROFILE"   # the main checkout's settings, see cmd_pipeline
   shift
   if [ "$kind" = autopilot ]; then launch_autopilot; return 0; fi
   case "$kind" in implement|fix|ship) ;; *) die "unknown launch '$kind': implement, fix, ship or autopilot" ;; esac
@@ -1271,6 +1280,7 @@ cmd_launch() {
 cmd_fix_brief() {
   [ $# -eq 1 ] || die "usage: fr.sh fix-brief <ID>"
   local id row ref docpr pr facts el ev eg ll lk ls nf ap
+  local PROFILE="$(main_worktree)/$PROFILE"   # the main checkout's settings, see cmd_pipeline
   id=$(fr_id "$1")
   row=$(rows | awk -F '\t' -v id="$id" '$1 == id')
   [ -n "$row" ] || die "no such FR: $id"

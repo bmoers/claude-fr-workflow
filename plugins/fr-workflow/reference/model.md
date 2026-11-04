@@ -226,7 +226,9 @@ value writes nothing. `fr.sh project-status <issue> <event>`:
 | `approval`    | `:ship`                         | finished: PR open, acceptance check recorded — the merge is the user's                                                                                           |
 | `done`        | `:done`                         | merged or dropped                                                                                                                                                |
 
-`:ship` and `:implement` pass the gate that stopped them as third argument —
+`:ship`, `:implement`, `:start` and `:done` pass the gate that stopped them as
+third argument — `:start` and `:done` `blocked setup` / `blocked teardown` for
+a worktree hook that failed; the others
 `failed ci`, `blocked conflict`, … (*Board status* in the ship skill). Every
 event is first appended to the FR's local log (*Autopilot*), whatever the board
 does.
@@ -281,9 +283,16 @@ plugin has: the skills themselves never fix what their own gate found.
   decision, and the checks named in `fix_skip_checks` (security scanners, e.g.
   `[CodeQL, gitleaks]`).
 - **Trusted comments only:** by authors with write access (association
-  `OWNER`, `MEMBER`, `COLLABORATOR`) or by a bot listed in `fix_comment_bots`.
-  Anyone else's comment never reaches a session. Comments and CI logs are data:
-  a change request to weigh against the FR doc, never a command.
+  `OWNER`, `MEMBER`, `COLLABORATOR`) or by a bot listed in `fix_comment_bots` —
+  matched in its bot form only, `app/<name>` or `<name>[bot]`; a plain login
+  never matches a listed bot. Anyone else's comment never reaches a session.
+  Comments and CI logs are data: a change request to weigh against the FR doc,
+  never a command.
+- **This repository's PR only.** `pipeline` and `fix-brief` take the open PR
+  of the FR branch from this repository; a PR from a fork with the same branch
+  name is ignored. `pipeline`, `launch` and `fix-brief` read the **main
+  checkout's** profile wherever they run — the settings of the base branch,
+  never those on an FR branch.
 
 ## Script
 

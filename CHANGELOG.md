@@ -31,6 +31,13 @@
 - Hard rule: a skill still never fixes what its own gate found; the only fix
   loop is the autopilot's, opt-in and bounded.
 - `:done` removes the FR from the autopilot's queue.
+- Fix loop, after review: a listed bot matches only in its bot form
+  (`app/<name>`, `<name>[bot]`), never a plain login; the FR's PR is taken from
+  this repository only, a fork's PR with the same branch name is ignored — in
+  `ship` too; `pipeline`, `launch` and `fix-brief` read the main checkout's
+  profile wherever they run.
+- `start` and `done` pass `setup` / `teardown` as the gate of a failed
+  worktree hook (`blocked setup`, `blocked teardown`).
 
 ## [0.5.4] — 2026-11-04
 

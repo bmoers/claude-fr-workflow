@@ -62,8 +62,11 @@ in the report, never a reason to stop.
   `base_branch`.
 - FR from $ARGUMENTS, else from the branch name; confirm it in `fr.sh list`. Read
   the FR doc.
-- Open PR of this branch, if any: `gh pr list --head <branch> --state open --json number,url`
-  (`gh pr view` without a number may return a closed or merged PR).
+- Open PR of this branch, if any:
+  `gh pr list --head <branch> --state open --json number,url,isCrossRepository`,
+  ignoring PRs with `isCrossRepository: true` — a fork may name its branch like
+  ours, and the FR's PR comes from this repository (`gh pr view` without a
+  number may return a closed or merged PR).
 - Look at uncommitted changes (`git status --porcelain`; files the project
   ignores are not changes — a dev stack's generated files, say). Anything that
   does not belong to the FR → ask; never restore or discard it.
