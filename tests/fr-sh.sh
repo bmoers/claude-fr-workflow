@@ -413,6 +413,10 @@ check "hook: a directory outside git is refused" '[ "$rc" = 1 ] && grep -q "not 
 check "hook: another clone is refused" '[ "$rc" = 1 ] && grep -q "not a worktree of this repository" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
 "$FR" hook up 80 "$WT" > "$SP/h.out" 2>&1; rc=$?
 check "hook: unknown kind → usage error" '[ "$rc" = 1 ] && grep -q "setup or teardown" "$SP/h.out"' "exit $rc: $(cat "$SP/h.out")"
+# an empty value followed by a comment is empty — the template is full of them
+printf -- '---\nfr_prefix:                  # empty, comment only\nworktree_setup:             # none\nproject: "Shop roadmap"   # quoted, then a comment\n---\n' > .claude/workflow.md
+"$FR" check > "$SP/check.out" 2>&1
+check "cfg: an empty value followed by a comment is empty; a quoted value ends at its quote" 'grep -q "prefix: FR " "$SP/check.out" && ! grep -q "hooks:" "$SP/check.out" && grep -q "^project:  Shop roadmap " "$SP/check.out"' "$(cat "$SP/check.out")"
 
 # --- autopilot: queue, pipeline, launch, fix loop
 newrepo "$SP/regress-ap" git@github.com:acme/ap.git

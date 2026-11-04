@@ -78,7 +78,7 @@ cfg() {
         # a quoted value ends at its closing quote — a " #" inside it is part of
         # the value; unquoted, " #" starts a comment
         if (substr(v, 1, 1) == "\"" && (q = index(substr(v, 2), "\"")) > 0) v = substr(v, 2, q - 1)
-        else { sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v) }
+        else { sub(/^#.*$/, "", v); sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v) }
         print v; exit
       }' "$PROFILE")
   fi
