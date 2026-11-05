@@ -21,7 +21,9 @@
   `fr.sh fix-brief`.
 - Event `implemented`, written by `:implement` at its hand-over.
 - Profile: `autopilot_model` (`sonnet`), `autopilot_effort` (`medium`),
-  `autopilot_sessions` (3).
+  `autopilot_sessions` (3), `session_permission_mode` (empty: your own default)
+  — passed to every launched session as `--permission-mode`; a background
+  session inherits no environment and cannot answer a prompt.
 
 ### Changed
 
@@ -38,6 +40,19 @@
   profile wherever they run.
 - `start` and `done` pass `setup` / `teardown` as the gate of a failed
   worktree hook (`blocked setup`, `blocked teardown`).
+- `fr.sh pipeline` reads what a launched session is doing from
+  `claude agents --json`: busy → `implementing` / `shipping`, `waiting` at a
+  prompt → reported with `claude attach <id>`, idle without a result →
+  `stalled`; after `approval` the PR decides, however long the ship session's
+  process lingers. The worktree lock counts for another pid's session and
+  decides alone when `claude agents` says nothing (first sandbox run of 0.6: a
+  finished ship session kept its FR in `shipping`). `pipeline --wait 0` returns
+  at once and records the result.
+- `fr.sh launch autopilot` refuses while the recorded autopilot runs (exit 3)
+  or `claude agents` cannot tell (exit 1), stops one whose loop ended, starts
+  the new one with nothing seen, and prints
+  its session id — `claude logs <id>`; the name `fr-autopilot` is ambiguous
+  once a second one ran.
 
 ## [0.5.4] — 2026-11-04
 

@@ -48,9 +48,16 @@ esac
 EOF
 chmod +x "$SP/stubbin/gh"
 # stub claude: logs every call; `stop` ends the session the test pretends runs
-# (its pid in $STUB/session.pid); a launch prints a session id like claude --bg
+# (its pid in $STUB/session.pid); `agents --json` answers from $STUB/agents
+# (nothing listed without it, unavailable with $STUB/agents-fails); a launch
+# prints a session id like claude --bg
 cat > "$SP/stubbin/claude" <<'EOF'
 #!/bin/bash
+if [ "$1" = agents ]; then
+  [ ! -f "$STUB/agents-fails" ] || exit 1
+  if [ -f "$STUB/agents" ]; then cat "$STUB/agents"; else echo '[]'; fi
+  exit 0
+fi
 echo "$*" >> "$CLAUDE_LOG"
 if [ "$1" = stop ]; then
   if [ -f "$STUB/session.pid" ]; then kill "$(cat "$STUB/session.pid")" 2>/dev/null; rm -f "$STUB/session.pid"; fi
@@ -456,7 +463,32 @@ check "launch: records the session id" 'grep -qE " launch ship ses[0-9]+0a$" "$L
 check "pipeline: launched but no session holds the worktree → stalled" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	stalled	report	the ship session"' "$("$FR" pipeline --no-fetch 2>&1)"
 { sleep 300 & } 2>/dev/null; echo $! > "$STUB/session.pid"; disown $!
 git worktree unlock .claude/worktrees/fr-70-a; git worktree lock --reason "claude session (pid $(cat "$STUB/session.pid"))" .claude/worktrees/fr-70-a
-check "pipeline: launched and held → shipping" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	shipping	none"' "$("$FR" pipeline --no-fetch 2>&1)"
+# the lock's pid is alive, but the launched session's own state decides: claude
+# agents lists it busy, waiting (a prompt nobody answers in the background) or
+# idle (its turn ended without a result — the process and its lock linger)
+SID70=$(sed -n 's/.* launch ship //p' "$LOG70" | tail -n 1)
+agents() { printf '[{"sessionId":"%s-0000-full","status":"%s","pid":%s}]' "$1" "$2" "${3:-1}"; }   # agents <id prefix> <status> [pid]
+LOCKPID=$(cat "$STUB/session.pid")
+stub agents "$(agents "$SID70" busy "$LOCKPID")"
+check "pipeline: launched and busy → shipping" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	shipping	none	$SID70"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub agents "$(agents "$SID70" waiting "$LOCKPID")"
+check "pipeline: launched and waiting at a prompt → waiting, claude attach" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	waiting	report	the ship session $SID70 waits for you: claude attach $SID70"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub agents "$(agents "$SID70" idle "$LOCKPID")"
+check "pipeline: launched, its own lock alive, session idle → stalled" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	stalled	report	the ship session $SID70 ended"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub agents-fails ""
+check "pipeline: claude agents unavailable → the lock decides" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	shipping	none"' "$("$FR" pipeline --no-fetch 2>&1)"
+nostub agents-fails
+# after the hand-over, the lingering lock of the session that reported is no
+# sign of life; a lock with another pid is someone's session in the worktree
+"$FR" project-status 70 implemented >/dev/null 2>&1
+check "pipeline: implemented, only the finished session's own lock → ship, nothing holds it" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	implemented	ship	$"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub agents "$(agents "$SID70" idle 1)"
+check "pipeline: implemented, another pid holds the lock → ship, says the worktree is held" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	implemented	ship	a session still holds"' "$("$FR" pipeline --no-fetch 2>&1)"
+"$FR" project-status 70 running >/dev/null 2>&1
+check "pipeline: running, another pid holds the lock → shipping" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	shipping	none"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub agents "$(agents "$SID70" idle "$LOCKPID")"
+check "pipeline: running, only the finished session's own lock → stalled" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	stalled	report	no session works on it"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub agents "$(agents "$SID70" busy 1)"
 "$FR" project-status 70 failed ci >/dev/null 2>&1
 check "pipeline: red CI with fix_loop off → report" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	failed	report	ci (fix_loop: off)"' "$("$FR" pipeline --no-fetch 2>&1)"
 printf -- '---\nautopilot_sessions: 2\nfix_loop: checks\nfix_attempts: 1\nfix_skip_checks: [CodeQL, gitleaks]\n---\n' > .claude/workflow.md
@@ -467,6 +499,11 @@ check "pipeline: a red check from fix_skip_checks never goes to the fix loop" '"
 "$FR" fix-brief FR-70 > "$SP/fb.out" 2>&1
 check "fix-brief: names the red checks, marks the skipped one" 'grep -q "^red check: build" "$SP/fb.out" && grep -q "not for the fix loop: codeql" "$SP/fb.out" && grep -q "attempt: 1/1" "$SP/fb.out"' "$(cat "$SP/fb.out")"
 stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncheck\tbuild\tfail')"
+# the lock's pid is not the recorded session's: someone else's session, never stopped
+: > "$CLAUDE_LOG"
+"$FR" launch fix 70 > "$SP/l.out" 2>&1; rc=$?
+check "launch: the lock belongs to another pid than the recorded session → exit 3, nothing stopped" '[ "$rc" = 3 ] && grep -q "did not start holds fr-70-a" "$SP/l.out" && ! grep -q "^stop" "$CLAUDE_LOG"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+stub agents "$(agents "$SID70" busy "$LOCKPID")"
 : > "$CLAUDE_LOG"
 "$FR" launch fix 70 > "$SP/l.out" 2>&1; rc=$?
 check "launch fix: stops the autopilot's own session, implement in fix mode with the FR's model" '[ "$rc" = 0 ] && grep -qE "^stop ses[0-9]+0a$" "$CLAUDE_LOG" && grep -qx -- "-w fr-70-a --bg --model opus --effort high -n FR-70 fix 1 /fr-workflow:implement FR-70 fix" "$CLAUDE_LOG"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
@@ -483,6 +520,15 @@ if [ -f "$STUB/session.pid" ]; then kill "$(cat "$STUB/session.pid")" 2>/dev/nul
 branch_fr feat/fr-72-b FR-72-b.md FR-72 Seventy-two in-review "" "src/b"
 printf -- '---\nautopilot_sessions: 2\nfix_loop: checks\n---\n' > .claude/workflow.md
 stub prlist "92"
+# its ship session reported approval and is still listed, lock alive: the PR
+# decides from here, not the process
+git worktree add -q .claude/worktrees/fr-72-b feat/fr-72-b
+{ sleep 300 & } 2>/dev/null; echo $! > "$STUB/session72.pid"; disown $!
+git worktree lock --reason "claude session (pid $(cat "$STUB/session72.pid"))" .claude/worktrees/fr-72-b
+LOG72="$(git rev-parse --git-common-dir)/fr-workflow/FR-72.log"
+printf '%s launch ship sesSHIP72\n' "$(date -u +%s)" >> "$LOG72"
+stub agents "$(agents sesSHIP72 busy)"
+check "pipeline: launched ship, no event yet, lock alive, listed busy → shipping" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	shipping	none	sesSHIP72"' "$("$FR" pipeline --no-fetch 2>&1)"
 "$FR" project-status 72 approval >/dev/null 2>&1
 stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncheck\tbuild\tpass\ncomment\t1\tMEMBER\tboris\thttps://x/1\ncomment\t4102444800\tNONE\tstranger\thttps://x/2')"
 check "pipeline: green PR, only old or untrusted comments → waits for the merge" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	none	PR #92 waits for your merge"' "$("$FR" pipeline --no-fetch 2>&1)"
@@ -510,6 +556,7 @@ check "pipeline: a conflicting PR → ship again" '"$FR" pipeline --no-fetch 2>/
 stub prview "$(printf 'pr\tCLOSED\tUNKNOWN\tUNKNOWN')"
 check "pipeline: a PR closed unmerged → report" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	report	PR #92 closed"' "$("$FR" pipeline --no-fetch 2>&1)"
 stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tCLEAN')"
+kill "$(cat "$STUB/session72.pid")" 2>/dev/null; rm -f "$STUB/session72.pid"
 
 # --wait: wakes at once on news, otherwise only after --max
 "$FR" pipeline --no-fetch --wait 1 --max 30 > "$SP/w1.out" 2>&1
@@ -518,6 +565,9 @@ check "pipeline --wait: same result → waits until --max" '[ "$dt" -ge 2 ] && c
 "$FR" queue rm FR-73 >/dev/null
 t0=$(date +%s); "$FR" pipeline --no-fetch --wait 1 --max 30 > "$SP/w3.out" 2>&1; dt=$(( $(date +%s) - t0 ))
 check "pipeline --wait: a change wakes it at once" '[ "$dt" -le 2 ] && ! grep -q "^FR-73" "$SP/w3.out"' "dt=$dt $(cat "$SP/w3.out")"
+SEEN="$(git rev-parse --git-common-dir)/fr-workflow/autopilot.seen"; printf 'stale\n' > "$SEEN"
+t0=$(date +%s); "$FR" pipeline --no-fetch --wait 0 > "$SP/w4.out" 2>&1; dt=$(( $(date +%s) - t0 ))
+check "pipeline --wait 0: returns at once and remembers the result" '[ "$dt" -le 1 ] && cmp -s "$SP/w4.out" "$SEEN"' "dt=$dt"
 
 # launches: a title from the issue never reaches the shell; the autopilot itself
 git stash -q -u 2>/dev/null || true
@@ -530,8 +580,48 @@ touch "$STUB/claude-untrusted"
 "$FR" launch ship FR-74 > "$SP/l.out" 2>&1; rc=$?
 check "launch: claude fails → exit 1 with its message, nothing logged" '[ "$rc" = 1 ] && grep -q "Workspace not trusted" "$SP/l.out" && ! grep -q "launch ship" "$(git rev-parse --git-common-dir)/fr-workflow/FR-74.log"' "exit $rc: $(cat "$SP/l.out")"
 rm -f "$STUB/claude-untrusted"
+# session_permission_mode reaches every launched session as a flag — a
+# background session inherits no environment and nobody answers its prompts
+printf -- '---\nsession_permission_mode: auto\n---\n' > .claude/workflow.md
+: > "$CLAUDE_LOG"
+"$FR" launch implement FR-74 > "$SP/l.out" 2>&1; rc=$?
+check "launch: session_permission_mode becomes --permission-mode" '[ "$rc" = 0 ] && grep -qx -- "-w fr-74-c --bg --model opus --effort high --permission-mode auto -n FR-74 Say hi HOME x /fr-workflow:implement FR-74" "$CLAUDE_LOG"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+: > "$CLAUDE_LOG"
 "$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
-check "launch autopilot: background session with autopilot_model, id kept" '[ "$rc" = 0 ] && grep -qx -- "--bg -n fr-autopilot --model sonnet --effort medium /fr-workflow:autopilot --loop" "$CLAUDE_LOG" && "$FR" queue session | grep -qE "^ses[0-9]+0a$"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+check "launch autopilot: background session with autopilot_model and the permission mode, id kept, says how to read its log" '[ "$rc" = 0 ] && grep -qx -- "--bg -n fr-autopilot --model sonnet --effort medium --permission-mode auto /fr-workflow:autopilot --loop" "$CLAUDE_LOG" && "$FR" queue session | grep -qE "^ses[0-9]+0a$" && grep -q "claude logs ses" "$SP/l.out"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+# a second autopilot never starts beside a running one; one whose loop ended
+# (listed idle) is stopped and replaced, and the new one starts with nothing seen
+SIDAP=$("$FR" queue session)
+SEEN="$(git rev-parse --git-common-dir)/fr-workflow/autopilot.seen"; printf 'seen\n' > "$SEEN"
+stub agents "$(agents "$SIDAP" busy)"; : > "$CLAUDE_LOG"
+"$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
+check "launch autopilot: the recorded one runs → exit 3, nothing started" '[ "$rc" = 3 ] && grep -q "runs as $SIDAP (busy)" "$SP/l.out" && [ ! -s "$CLAUDE_LOG" ] && [ "$("$FR" queue session)" = "$SIDAP" ] && [ -f "$SEEN" ]' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+stub agents-fails ""; : > "$CLAUDE_LOG"
+"$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
+check "launch autopilot: claude agents gives no answer → exit 1, no second autopilot" '[ "$rc" = 1 ] && grep -q "cannot tell whether the autopilot $SIDAP" "$SP/l.out" && [ ! -s "$CLAUDE_LOG" ] && [ -f "$SEEN" ]' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+nostub agents-fails
+printf -- '---\nsession_permission_mode: "auto --dangerously-skip-permissions"\n---\n' > .claude/workflow.md
+stub agents "$(agents "$SIDAP" idle)"; : > "$CLAUDE_LOG"
+"$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
+check "launch autopilot: a bad session_permission_mode stops before anything is stopped or forgotten" '[ "$rc" = 1 ] && grep -q "one word" "$SP/l.out" && [ ! -s "$CLAUDE_LOG" ] && [ -f "$SEEN" ]' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+printf -- '---\nsession_permission_mode: auto\n---\n' > .claude/workflow.md
+stub agents "$(agents "$SIDAP" idle)"; : > "$CLAUDE_LOG"
+"$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
+check "launch autopilot: the recorded one is idle → stopped and replaced, nothing seen yet" '[ "$rc" = 0 ] && grep -qx "stop $SIDAP" "$CLAUDE_LOG" && [ "$("$FR" queue session)" != "$SIDAP" ] && [ ! -f "$SEEN" ]' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+nostub agents; : > "$CLAUDE_LOG"
+"$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
+check "launch autopilot: the recorded one is gone → a new one, nothing stopped" '[ "$rc" = 0 ] && ! grep -q "^stop" "$CLAUDE_LOG"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+# a bad value stops the launch before the session holding the worktree is stopped
+LOG74="$(git rev-parse --git-common-dir)/fr-workflow/FR-74.log"
+SID74=$(sed -n 's/.* launch implement //p' "$LOG74" | tail -n 1)
+{ sleep 300 & } 2>/dev/null; echo $! > "$STUB/session.pid"; disown $!
+git worktree lock --reason "claude session (pid $(cat "$STUB/session.pid"))" .claude/worktrees/fr-74-c
+stub agents "$(agents "$SID74" idle "$(cat "$STUB/session.pid")")"
+printf -- '---\nsession_permission_mode: "auto --dangerously-skip-permissions"\n---\n' > .claude/workflow.md
+: > "$CLAUDE_LOG"
+"$FR" launch ship FR-74 > "$SP/l.out" 2>&1; rc=$?
+check "launch: session_permission_mode is one word, or the launch stops before any session is stopped" '[ "$rc" = 1 ] && grep -q "one word" "$SP/l.out" && [ ! -s "$CLAUDE_LOG" ] && kill -0 "$(cat "$STUB/session.pid")" 2>/dev/null' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+if [ -f "$STUB/session.pid" ]; then kill "$(cat "$STUB/session.pid")" 2>/dev/null; rm -f "$STUB/session.pid"; fi
 
 echo "--- $pass passed, $fail failed"
 [ "$fail" = 0 ]

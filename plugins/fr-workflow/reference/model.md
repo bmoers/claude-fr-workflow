@@ -249,7 +249,11 @@ reach wave 1 and start. It runs as the background session **fr-autopilot**, or
 in the user's session with `--here`.
 
 - **It decides with `fr.sh pipeline`, it acts with `fr.sh launch`.** Phases are
-  derived — FR doc, branch, the worktree lock, PR, checks — plus the FR's
+  derived — FR doc, branch, PR, checks, and what a launched session is doing
+  per `claude agents --json`: busy, `waiting` at a prompt, or idle (its turn
+  ended; the process and its worktree lock linger, so that lock is no sign of
+  life — a lock with another pid is someone's session, and the lock alone
+  decides when `claude agents` says nothing) — plus the FR's
   **local log** `<git common dir>/fr-workflow/<ID>.log`: the events the sessions
   reported (`project-status` appends every one) and the sessions the autopilot
   launched. Like the ship lock, it covers this clone only and is a record, never
@@ -257,6 +261,23 @@ in the user's session with `--here`.
 - **A session per worktree.** `launch` stops the autopilot's own earlier
   session there first (`claude stop`), never one it did not start; the prompt is
   a fixed slash command, nothing from the issue.
+- **A launched session that asks, waits.** Nobody answers in the background:
+  the pipeline shows it as `waiting` with `claude attach <id>`. A ship session's
+  questions — `notify_issues: ask`, acceptance criteria it could not verify — are
+  such prompts: with the autopilot, set `notify_issues` to `never` or `always`.
+  `session_permission_mode` (e.g. `auto`) goes to every launched session as
+  `--permission-mode`; a background session inherits no environment — only
+  flags and the project's settings reach it.
+- **One autopilot.** `launch autopilot` refuses (exit 3) while the recorded one
+  is busy or waiting, stops one whose loop ended, and starts the new one with
+  nothing seen, so its first `pipeline --wait` returns at once. It prints the
+  session id and keeps it (`queue session`): `claude logs <id>` reads its log —
+  the name `fr-autopilot` is ambiguous once a second one ran.
+- **Two copies of the profile.** A skill in an FR worktree — `implement`,
+  `ship` — reads the FR branch's `.claude/workflow.md`; `fr.sh hook`,
+  `pipeline`, `launch` and `fix-brief` read the main checkout's. A change on the
+  base branch reaches an FR's sessions once its branch has it: merge the base
+  branch into the FR branch, or change the profile before the FR starts.
 - **At most `autopilot_sessions`** FR sessions at a time (default 3); further
   starts wait.
 - **The merge stays the user's.** So do the answers to a session's questions,
@@ -298,21 +319,21 @@ plugin has: the skills themselves never fix what their own gate found.
 
 `${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh`, from anywhere inside the repository:
 
-| Command                                                  | Does                                                                                                                                                                                                                                                           |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `check`                                                  | prerequisites and profile                                                                                                                                                                                                                                      |
-| `list`                                                   | all FRs as TSV: `id status location ref path pr issue requests title areas model effort`                                                                                                                                                                       |
-| `spec <issue> [<file>]`                                  | the FR doc of an FR issue — to stdout to check it, into a new `<file>` at the start. Exit 4 = not ready, with the reasons                                                                                                                                      |
-| `issue-frs <issue>`                                      | the FRs serving a request: `ref state reason via` — `reason` `completed`, `not_planned` or `duplicate` once closed; `via` `self`, `sub` or `requests`                                                                                                          |
-| `overlap [<ID>...]`                                      | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now                                       |
-| `lock acquire\|release\|break\|status <ID>`              | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs                                                                                                                        |
-| `project-status <issue> <event> [<gate>]`                | appends the event to the FR's local log, then the board column per `project_status`: `defined`, `input`, `running`, `implemented`, `failed`, `blocked`, `approval`, `done`. Exit 5 = board not written, reason on stderr — a line for the report, never a stop |
-| `hook setup\|teardown <ID> <path>`                       | the profile's `worktree_setup` / `worktree_teardown` in that worktree, without stdin, with `FR_ID`, `FR_NUMBER`, `FR_BRANCH`, `FR_WORKTREE`; output passes through. Exit 6 = the hook failed; no hook in the profile = nothing to run, exit 0                  |
-| `queue add\|rm\|list\|clear\|session [<ID>...]`          | the autopilot's FRs; `session` = the autopilot's session id                                                                                                                                                                                                    |
-| `pipeline [--no-fetch] [--wait <s> [--max <s>]]`         | per queued FR `id phase action detail`; actions `start`, `ship`, `fix`, `report`, `wait`, `none`. `--wait` returns when the result changed since the last one it returned                                                                                      |
-| `launch implement\|fix\|ship <ID> [--replace <session>]` | one background session in the FR's worktree, model by kind; stops the autopilot's own earlier session there first, never an unknown one (exit 3). `launch autopilot` starts the autopilot                                                                      |
-| `fix-brief <ID>`                                         | the brief of the next fix session: the gate, red checks, trusted comments                                                                                                                                                                                      |
-| `project-options [<value>...]`                           | adds the values of `project_status` (or the given ones) that the status column lacks; existing options keep id, colour and text. Prints the project's *Workflows* page. Exit 5 = nothing changed, reason on stderr                                             |
+| Command                                                  | Does                                                                                                                                                                                                                                                                                             |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `check`                                                  | prerequisites and profile                                                                                                                                                                                                                                                                        |
+| `list`                                                   | all FRs as TSV: `id status location ref path pr issue requests title areas model effort`                                                                                                                                                                                                         |
+| `spec <issue> [<file>]`                                  | the FR doc of an FR issue — to stdout to check it, into a new `<file>` at the start. Exit 4 = not ready, with the reasons                                                                                                                                                                        |
+| `issue-frs <issue>`                                      | the FRs serving a request: `ref state reason via` — `reason` `completed`, `not_planned` or `duplicate` once closed; `via` `self`, `sub` or `requests`                                                                                                                                            |
+| `overlap [<ID>...]`                                      | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now                                                                         |
+| `lock acquire\|release\|break\|status <ID>`              | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs                                                                                                                                                          |
+| `project-status <issue> <event> [<gate>]`                | appends the event to the FR's local log, then the board column per `project_status`: `defined`, `input`, `running`, `implemented`, `failed`, `blocked`, `approval`, `done`. Exit 5 = board not written, reason on stderr — a line for the report, never a stop                                   |
+| `hook setup\|teardown <ID> <path>`                       | the profile's `worktree_setup` / `worktree_teardown` in that worktree, without stdin, with `FR_ID`, `FR_NUMBER`, `FR_BRANCH`, `FR_WORKTREE`; output passes through. Exit 6 = the hook failed; no hook in the profile = nothing to run, exit 0                                                    |
+| `queue add\|rm\|list\|clear\|session [<ID>...]`          | the autopilot's FRs; `session` = the autopilot's session id                                                                                                                                                                                                                                      |
+| `pipeline [--no-fetch] [--wait <s> [--max <s>]]`         | per queued FR `id phase action detail`; actions `start`, `ship`, `fix`, `report`, `wait`, `none`. `--wait` returns when the result changed since the last one it returned; `--wait 0` returns at once and still records the result                                                               |
+| `launch implement\|fix\|ship <ID> [--replace <session>]` | one background session in the FR's worktree, model by kind; stops the autopilot's own earlier session there first, never an unknown one (exit 3). `launch autopilot` starts the autopilot and prints its session id; exit 3 while the recorded one runs, exit 1 when `claude agents` cannot tell |
+| `fix-brief <ID>`                                         | the brief of the next fix session: the gate, red checks, trusted comments                                                                                                                                                                                                                        |
+| `project-options [<value>...]`                           | adds the values of `project_status` (or the given ones) that the status column lacks; existing options keep id, colour and text. Prints the project's *Workflows* page. Exit 5 = nothing changed, reason on stderr                                                                               |
 
 `location` is `issue` (not started; `ref` is the issue), `base`, `branch` (then
 `ref` is the branch) or `local` (uncommitted in this checkout). `list` and

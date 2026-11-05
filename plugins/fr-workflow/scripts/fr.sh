@@ -933,12 +933,45 @@ wt_of() {
 # A Claude session holds the worktree: Claude Code locks it with a reason that
 # names the pid. A lock whose pid is gone is stale — no session. A lock without
 # a pid counts as held: never start a second session beside an unknown one.
+lock_pid() { printf '%s' "$1" | sed -n 's/.*pid \([0-9][0-9]*\).*/\1/p'; }   # <lock reason>
 held() { # <lock reason>
   local pid
   [ -n "$1" ] || return 1
-  pid=$(printf '%s' "$1" | sed -n 's/.*pid \([0-9][0-9]*\).*/\1/p')
+  pid=$(lock_pid "$1")
   [ -n "$pid" ] || return 0
   kill -0 "$pid" 2>/dev/null
+}
+
+# What a session the autopilot launched is doing, from `claude agents --json`:
+# busy; waiting (a permission prompt or a question — nobody answers it in the
+# background); idle (its turn ended — the process and its worktree lock linger,
+# so the lock alone would call it live); gone (not listed: stopped); unknown
+# (claude agents unavailable, or no status for it). Loaded once per run.
+AGENTS_JSON=""
+load_agents() { AGENTS_JSON=$("$CLAUDE_BIN" agents --json 2>/dev/null) || AGENTS_JSON=""; }
+session_state() { # <session id, or the prefix claude --bg printed>
+  [ -n "$AGENTS_JSON" ] && [ -n "$1" ] || { echo unknown; return 0; }
+  printf '%s' "$AGENTS_JSON" | jq -r --arg s "$1" '
+    [.[] | select((.sessionId // "") | startswith($s))]
+    | if length == 0 then "gone" else (.[0].status // "unknown") end' 2>/dev/null || echo unknown
+}
+session_pid() { # <session id, or its prefix> → the pid claude agents lists, or nothing
+  [ -n "$AGENTS_JSON" ] && [ -n "$1" ] || return 0
+  printf '%s' "$AGENTS_JSON" | jq -r --arg s "$1" '
+    [.[] | select((.sessionId // "") | startswith($s))]
+    | if length == 0 then "" else ((.[0].pid // "") | tostring) end' 2>/dev/null || true
+}
+# the pipeline row of a launched session that waits at a prompt (lk, ls of the caller)
+waiting_row() { printf 'waiting\treport\tthe %s session %s waits for you: claude attach %s\n' "$lk" "$ls" "$ls"; }
+
+# --permission-mode for the sessions launch starts, from the profile's
+# session_permission_mode: one word, or nothing — then the user's own default
+# applies. Validated here, used with "$@" after `set --`.
+pm_args() {
+  local pm; pm=$(cfg session_permission_mode "")
+  [ -n "$pm" ] || return 0
+  printf '%s' "$pm" | grep -qE '^[A-Za-z]+$' || die "session_permission_mode must be one word (auto, acceptEdits, …), not '$pm'"
+  printf -- '--permission-mode\n%s\n' "$pm"
 }
 
 queue_file() { echo "$(state_dir)/autopilot.queue"; }
@@ -1045,7 +1078,7 @@ fix_verdict() { # <what> <class> <nf>
 # "phase<TAB>action<TAB>detail" of one FR — the heart of the autopilot.
 # Actions: start, ship, fix, report, wait, none.
 phase_of() { # <row> <wave> <conflicts>
-  local id status loc ref docpr el ev eg ll lk ls nf ap wt reason live pr facts fails skips cmts
+  local id status loc ref docpr el ev eg ll lk ls nf ap wt reason own live sst spid lpid pr facts fails skips cmts
   id=$(printf '%s' "$1" | cut -f1); status=$(printf '%s' "$1" | cut -f2)
   loc=$(printf '%s' "$1" | cut -f3); ref=$(printf '%s' "$1" | cut -f4); docpr=$(printf '%s' "$1" | cut -f6)
   read_facts "$id"
@@ -1060,14 +1093,30 @@ phase_of() { # <row> <wave> <conflicts>
     in-progress|in-review) ;;
     *) printf 'unknown\treport\tstatus %s\n' "$status"; return 0 ;;
   esac
-  live=0
-  if [ "$loc" = branch ]; then
+  # who works on it: the session the autopilot launched (own), by its state —
+  # busy or waiting is live, idle or gone has ended. The worktree lock then still
+  # counts when another pid holds it (the user's own session, between turns
+  # too), not when it is the lingering lock of the session that ended; and it
+  # decides alone when claude agents says nothing.
+  own=0; live=0; sst=unknown; spid=""
+  if [ "$ls" != "-" ]; then sst=$(session_state "$ls"); spid=$(session_pid "$ls"); fi
+  case "$sst" in busy|waiting) own=1; live=1 ;; esac
+  if [ "$live" = 0 ] && [ "$loc" = branch ]; then
     wt=$(wt_of "$ref"); reason=$(printf '%s' "$wt" | cut -f2)
-    if [ -n "$wt" ] && held "$reason"; then live=1; fi
+    if [ -n "$wt" ] && held "$reason"; then
+      lpid=$(lock_pid "$reason")
+      case "$sst" in
+        idle|gone) if [ -z "$lpid" ] || [ "$lpid" != "$spid" ]; then live=1; fi ;;
+        *) own=1; live=1 ;;   # claude agents said nothing: the lock holder is taken for the launched session
+      esac
+    fi
   fi
+  # the ship session reported approval: the PR decides, however long its process lingers
+  if [ "$ev" = approval ] && [ "$ll" -le "$el" ]; then own=0; live=0; sst=done; fi
   # a launch after the last event: that session has not reported yet
   if [ "$ll" -gt "$el" ]; then
-    if [ "$live" = 1 ]; then
+    if [ "$sst" = waiting ]; then waiting_row
+    elif [ "$own" = 1 ]; then
       if [ "$lk" = ship ]; then printf 'shipping\tnone\t%s\n' "$ls"; else printf 'implementing\tnone\t%s %s\n' "$lk" "$ls"; fi
     else
       printf 'stalled\treport\tthe %s session %s ended without a result: claude logs %s\n' "$lk" "$ls" "$ls"
@@ -1099,12 +1148,13 @@ phase_of() { # <row> <wave> <conflicts>
       fi
       return 0 ;;
   esac
+  if [ "$sst" = waiting ]; then waiting_row; return 0; fi
   if [ "$live" = 1 ]; then
     if [ "$lk" = ship ]; then printf 'shipping\tnone\t\n'; else printf 'implementing\tnone\t\n'; fi
     return 0
   fi
   if [ "$status" = in-progress ]; then
-    printf 'stalled\treport\tno session holds the worktree and none reported a result\n'; return 0
+    printf 'stalled\treport\tno session works on it and none reported a result\n'; return 0
   fi
   # in review: the PR decides — merged soon, conflicting, red, or commented on
   pr=$(pr_of "$ref" "$docpr")
@@ -1137,7 +1187,7 @@ pipeline_once() {
   ids=$(queue_ids)
   printf 'id\tphase\taction\tdetail\n'
   [ -n "$ids" ] || return 0
-  ROWS=$(rows)
+  ROWS=$(rows); load_agents
   open=$(for id in $ids; do printf '%s\n' "$ROWS" | awk -F '\t' -v id="$id" '$1 == id && $2 == "open" { print id }'; done)
   ov=""
   if [ -n "$open" ]; then ov=$(cmd_overlap $open --no-fetch 2>/dev/null) || ov=""; fi
@@ -1160,7 +1210,8 @@ pipeline_once() {
 
 # --wait <s>: block until the result differs from the one the autopilot saw
 # last, checking every <s> seconds (fetch included); --max <s> ends the wait
-# anyway. The autopilot wakes for changes, not for every check.
+# anyway; --wait 0 returns at once and records what it returned, for a first
+# look. The autopilot wakes for changes, not for every check.
 cmd_pipeline() {
   local wait="" max=0 nofetch="" out seen t0
   # the autopilot's settings come from the main checkout's profile — the base
@@ -1182,7 +1233,8 @@ cmd_pipeline() {
   seen="$(state_dir)/autopilot.seen"; t0=$(date -u +%s)
   while :; do
     out=$(pipeline_once)
-    if [ ! -f "$seen" ] || [ "$out" != "$(cat "$seen")" ]; then break; fi
+    # --wait 0 returns at once and still remembers the result, like every --wait
+    if [ "$wait" = 0 ] || [ ! -f "$seen" ] || [ "$out" != "$(cat "$seen")" ]; then break; fi
     if [ "$max" -gt 0 ] && [ $(( $(date -u +%s) - t0 + wait )) -gt "$max" ]; then break; fi
     sleep "$wait"
     [ -n "$nofetch" ] || do_fetch
@@ -1198,23 +1250,42 @@ bg_session_id() { tr -s ' \t\r' '\n' | tr -d '.,;:()[]`' | grep -E '^[A-Za-z0-9]
 main_worktree() { git worktree list --porcelain | sed -n '1s/^worktree //p'; }
 
 launch_autopilot() {
-  local out sid
+  local out sid prev st pm
+  pm=$(pm_args)   # a bad profile value stops here, before anything is stopped or forgotten
   cd "$(main_worktree)"
+  # the autopilot recorded here: running → it picks the queue up by itself
+  # (exit 3); its loop ended and the process lingers idle → replaced; gone →
+  # nothing to do; no answer from claude agents → no second one beside what may
+  # be a running one.
+  prev=$(cmd_queue session)
+  if [ -n "$prev" ]; then
+    load_agents; st=$(session_state "$prev")
+    case "$st" in
+      busy|waiting) echo "fr.sh: the autopilot runs as $prev ($st) and picks the queue up by itself; /fr-workflow:autopilot stop ends it" >&2; exit 3 ;;
+      idle) "$CLAUDE_BIN" stop "$prev" >/dev/null 2>&1 || true ;;
+      gone) ;;
+      *) die "cannot tell whether the autopilot $prev still runs (claude agents --json gave no answer): look at 'claude agents' — running → it picks the queue up by itself; gone → launch again" ;;
+    esac
+  fi
+  # a new autopilot has seen nothing: its first `pipeline --wait` returns at once
+  rm -f "$(state_dir)/autopilot.seen"
+  set -- $pm
   out=$("$CLAUDE_BIN" --bg -n fr-autopilot --model "$(cfg autopilot_model sonnet)" \
-    --effort "$(cfg autopilot_effort medium)" '/fr-workflow:autopilot --loop' 2>&1) || { printf '%s\n' "$out" >&2; exit 1; }
+    --effort "$(cfg autopilot_effort medium)" "$@" '/fr-workflow:autopilot --loop' 2>&1) || { printf '%s\n' "$out" >&2; exit 1; }
   sid=$(printf '%s\n' "$out" | bg_session_id)
   [ -n "$sid" ] || { printf '%s\n' "$out" >&2; die "no session id in the output of claude --bg"; }
   printf '%s\n' "$sid" > "$(state_dir)/autopilot.session"
-  echo "launched autopilot as $sid (fr-autopilot)"
+  echo "launched autopilot as $sid (fr-autopilot): claude logs $sid"
 }
 
 # One background session for a started FR, in its worktree, with the model the
 # kind calls for. The prompt is a fixed slash command — no text from the issue.
 cmd_launch() {
   [ $# -ge 1 ] || die "usage: fr.sh launch implement|fix|ship <ID> [--replace <session>] | fr.sh launch autopilot"
-  local kind="$1" id row status loc ref title model effort wt name reason stop n sname prompt out sid i
+  local kind="$1" id row status loc ref title model effort wt name reason stop n sname prompt out sid i pm spid lpid
   local el ev eg ll lk ls nf ap
   local PROFILE="$(main_worktree)/$PROFILE"   # the main checkout's settings, see cmd_pipeline
+  pm=$(pm_args)   # a bad profile value stops here, before any session is stopped
   shift
   if [ "$kind" = autopilot ]; then launch_autopilot; return 0; fi
   case "$kind" in implement|fix|ship) ;; *) die "unknown launch '$kind': implement, fix, ship or autopilot" ;; esac
@@ -1242,10 +1313,15 @@ cmd_launch() {
   if [ "$kind" = fix ] && [ "$n" -gt "$(cfg fix_attempts 2)" ]; then
     echo "fr.sh: $id has used its $(cfg fix_attempts 2) fix attempts" >&2; exit 3
   fi
-  # one session per worktree: a live one is stopped first — the autopilot's own,
-  # or the one named with --replace; an unknown one is never touched
+  # one session per worktree: a live one is stopped first — the autopilot's own
+  # (the lock names its pid; when claude agents says nothing, the recorded
+  # session is taken for the holder), or the one named with --replace; any
+  # other is never touched
   if held "$reason"; then
-    [ -n "$stop" ] || { [ "$ls" = "-" ] || stop=$ls; }
+    if [ -z "$stop" ] && [ "$ls" != "-" ]; then
+      load_agents; spid=$(session_pid "$ls"); lpid=$(lock_pid "$reason")
+      if [ -z "$AGENTS_JSON" ] || [ -z "$lpid" ] || [ "$lpid" = "$spid" ]; then stop=$ls; fi
+    fi
     if [ -z "$stop" ]; then
       echo "fr.sh: a session the autopilot did not start holds $name ($reason): end it, or pass its id from 'claude agents' with --replace" >&2
       exit 3
@@ -1267,7 +1343,8 @@ cmd_launch() {
     ship)      sname="$id ship";    prompt="/fr-workflow:ship $id" ;;
   esac
   cd "$(main_worktree)"
-  out=$("$CLAUDE_BIN" -w "$name" --bg --model "$model" --effort "$effort" -n "$sname" "$prompt" 2>&1) ||
+  set -- $pm
+  out=$("$CLAUDE_BIN" -w "$name" --bg --model "$model" --effort "$effort" "$@" -n "$sname" "$prompt" 2>&1) ||
     { printf '%s\n' "$out" >&2; exit 1; }
   sid=$(printf '%s\n' "$out" | bg_session_id)
   [ -n "$sid" ] || { printf '%s\n' "$out" >&2; die "no session id in the output of claude --bg"; }

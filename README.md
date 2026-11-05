@@ -6,14 +6,26 @@ developer has installed.
 
 ```mermaid
 flowchart LR
-  A["your idea"] -->|"new"| F["FR issue<br/>full spec · project"]
-  R["request on GitHub"] -->|"new"| F
-  F -->|"start"| P["FR doc · branch ·<br/>worktree · session"]
-  P -->|"ship"| S["review · PR · CI ·<br/>test deploy · acceptance"]
+  subgraph define["define — the issue is the spec"]
+    A["your idea"] -->|"new"| F["FR issue<br/>full spec · on the board"]
+    R["request on GitHub<br/>issue form"] -->|"new"| F
+  end
+  subgraph build["build — one worktree per FR"]
+    P["FR doc · branch · worktree<br/>hook: worktree_setup"] -->|"implement"| I["commits locally,<br/>never pushes"]
+  end
+  subgraph finish["finish — the gates"]
+    S["ship: code + security review ·<br/>PR · CI · test deploy · acceptance"]
+  end
+  F -->|"start"| P
+  I -->|"ship"| S
   S -->|"you merge"| M["merged"]
-  M -->|"done"| C["requests closed<br/>when fully served"]
+  M -->|"done<br/>hook: worktree_teardown"| C["issues closed ·<br/>worktree gone"]
+  S -.->|"a gate stops: you decide —<br/>or the opt-in fix loop"| I
   M -.->|"autopilot: next wave"| P
 ```
+
+Solid arrows are the commands you run; dotted ones are what the autopilot does
+for you once you hand it a queue.
 
 | Command                  | Does                                                                                                                                       |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -25,6 +37,19 @@ flowchart LR
 | `/fr-workflow:done`      | after the merge — or to drop an FR: close fully served requests (asks first), clean up                                                     |
 | `/fr-workflow:status`    | overview of all FRs with their sessions, the requests still to define, and which FRs can run in parallel                                   |
 | `/fr-workflow:autopilot` | drives queued FRs through start, implement and ship in the background: next wave after each merge, optional fix loop; you merge            |
+
+## By hand, in parallel, or autopilot
+
+Three ways to run the same process. The gates, the reviews and the merge are the
+same in all of them; what changes is who does the hand-offs.
+
+| You want                                  | Run                                                                                      | Stays yours                                                                                                                                                     |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| one FR, you at the keyboard               | `start #20`, then `implement` and `ship` in the worktree session, `done` after the merge | everything: each session is opened by you                                                                                                                       |
+| several FRs at once, you at the hand-offs | `start #20 #22 #23` — one background session per FR of the first wave                    | opening each ship session, starting the next wave after a merge, every gate that stops                                                                          |
+| a queue, you only merge                   | `autopilot #20 #21 #22 #23`                                                              | the merge, answers when a session asks, every FR the autopilot reports; with `fix_loop` red checks and trusted review comments go back to a fresh session first |
+
+Details and an example: [usage](docs/usage.md#three-ways-to-run-it).
 
 ## Documentation
 
@@ -54,6 +79,10 @@ flowchart LR
   protected base branch after a merge.
 - **Project facts live in the project** (`.claude/workflow.md`), the process lives
   here. The plugin contains nothing customer-specific.
+- **What a worktree needs beside the checkout is the project's.** A dev stack
+  per worktree, dependencies, an `.env`: the profile names a `worktree_setup`
+  and a `worktree_teardown` command, `start` and `done` run them, and the plugin
+  knows nothing else about them. Ignored files are invisible to every command.
 - **No code leaves the machine unreviewed.** Implementation sessions commit
   without pushing; `ship` pushes after the code and security review. A secret
   found there always stops and is removed from the unpushed commits.

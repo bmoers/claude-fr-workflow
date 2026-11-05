@@ -94,7 +94,11 @@ pitfalls that the code does not show.
   lack (what a session reported, which session the autopilot launched) go into
   a local log per FR in the git common dir, like the ship lock. `launch` stops
   only sessions it started or one named with `--replace`, and its prompts are
-  fixed slash commands: no issue text reaches a shell or a prompt.
+  fixed slash commands: no issue text reaches a shell or a prompt. Whether a
+  launched session still works comes from `claude agents --json` (busy,
+  waiting, idle) first; the worktree lock counts for another pid's session, and
+  decides alone when `claude agents` says nothing — a finished session lingers
+  idle with its lock, and the first sandbox run waited on one forever.
 - **Fix loop** (0.6) reopens "no improvised fix loop" for one reason: routine
   red checks and review comments cost a human round trip each. Bounded instead
   of forbidden: opt-in `fix_loop` (default `off`), `fix_attempts`, a fresh
@@ -145,6 +149,13 @@ pitfalls that the code does not show.
   or `~/.claude/plugins/marketplaces/claude-fr-workflow/plugins/fr-workflow` for
   the pinned version. Prompts must carry the user's confirmations — skills stop
   at their gates otherwise.
+- **Background sessions** (`claude --bg`, used by `fr.sh launch` and `start`)
+  are pre-spawned daemon processes: nothing of the caller's environment reaches
+  them, only flags and the project's settings. `FR_CLAUDE` (the `claude` that
+  fr.sh calls) is a test hook for the shell running fr.sh; a launched session
+  gets it only from the sandbox's `.claude/settings.local.json` `env`. A plugin
+  disabled with `claude plugin disable -s local` is disabled in worktree
+  sessions too.
 - A raised pin takes effect only after the marketplace is re-registered at
   the new tag: `claude plugin marketplace remove claude-fr-workflow --scope user`
   (without `--scope`, run inside a repository, it also strips the pin from that

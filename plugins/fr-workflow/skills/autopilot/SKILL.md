@@ -28,34 +28,39 @@ Arguments: $ARGUMENTS
    session included; `merged`, `dropped` or not listed → leave it out, say so.
    None given → offer the `open` FRs that pass `fr.sh spec`, and ask.
 2. `fr.sh queue add <IDs>`.
-3. Is an autopilot running? `fr.sh queue session` names its session id; look it
-   up in `claude agents --json`. Running → done: it picks the new FRs up by
-   itself. Go to 5.
-4. Not running → `fr.sh launch autopilot`. It starts `/fr-workflow:autopilot
-   --loop` as the background session **fr-autopilot** with the profile's
-   `autopilot_model` / `autopilot_effort`. *Workspace not trusted* → the user
-   runs `claude` once in the repository and accepts — never work around it.
-   With `--here`, or when the user prefers it, or when the background start
-   fails for another reason: say so and run **C** in this session instead.
+3. `fr.sh launch autopilot`. Exit 3 → an autopilot is running (the message
+   names its session): it picks the new FRs up by itself; go to 5.
+4. Otherwise it started `/fr-workflow:autopilot --loop` as the background
+   session **fr-autopilot** with the profile's `autopilot_model` /
+   `autopilot_effort` and `session_permission_mode`, and printed its session
+   id — an earlier autopilot whose loop had ended was stopped first. It stops
+   with *cannot tell whether the autopilot … still runs* when `claude agents`
+   gave no answer: look at `claude agents` yourself — the autopilot runs → go
+   to 5; it is gone → launch again. *Workspace not trusted* → the user runs
+   `claude` once in the repository and accepts — never work around it. With
+   `--here`, or when the user prefers it, or when the background start fails
+   for another reason: say so and run **C** in this session instead.
 5. Hand over in one block: the queue with `fr.sh pipeline` (phase, next action,
    detail per FR) and how to follow it:
 
-   | To                                     | Run                         |
-   | -------------------------------------- | --------------------------- |
-   | what each FR is doing and waits for    | `/fr-workflow:autopilot status` |
-   | the autopilot's own log                | `claude logs fr-autopilot`  |
-   | every session, live                    | `claude agents`             |
-   | answer a session's question            | `claude attach "<ID> …"`    |
-   | stop the autopilot (sessions go on)    | `/fr-workflow:autopilot stop` |
+   | To                                  | Run                             |
+   | ----------------------------------- | ------------------------------- |
+   | what each FR is doing and waits for | `/fr-workflow:autopilot status` |
+   | the autopilot's own log             | `claude logs <session id>`      |
+   | every session, live                 | `claude agents`                 |
+   | answer a session's question         | `claude attach "<ID> …"`        |
+   | stop the autopilot (sessions go on) | `/fr-workflow:autopilot stop`   |
 
+   The session id is the one `launch autopilot` printed (`fr.sh queue session`
+   keeps it) — the name `fr-autopilot` is ambiguous once a second autopilot ran.
    And what stays the user's: every merge; answers when a session asks; every
    FR the pipeline reports.
 
 ## B. `status`, `stop`, `rm`
 
-- `status` → `fr.sh pipeline` as a table, the autopilot session's state from
-  `claude agents --json` (session id from `fr.sh queue session`), and for each
-  FR in `report` what the user can do about it. Read-only.
+- `status` → `fr.sh pipeline` as a table, the autopilot session's id (from
+  `fr.sh queue session`) and its state from `claude agents --json`, and for
+  each FR in `report` what the user can do about it. Read-only.
 - `stop` → `claude stop <session id from fr.sh queue session>`. Running FR
   sessions go on; the queue stays — `/fr-workflow:autopilot` without FRs starts
   the autopilot again on it.
@@ -64,12 +69,14 @@ Arguments: $ARGUMENTS
 ## C. The loop (`--loop`, or `--here`)
 
 You are the autopilot. Repeat until the queue holds only `merged` and `dropped`
-FRs:
+FRs — a `failed`, `blocked`, `waiting` or `stalled` FR is not finished: report
+it once and keep waiting; the user acts, the pipeline changes, you go on:
 
 1. `fr.sh pipeline --wait 60` **in the background** — it returns when the
-   result differs from the last one it returned (the first call returns at
-   once). Do not poll in the foreground and do not end your turn while it runs:
-   wait for it.
+   result differs from the last one it returned; after `fr.sh launch autopilot`
+   the first call returns at once (with `--here`, make the first call
+   `fr.sh pipeline --wait 0`: it returns at once as well). Do not poll in the
+   foreground and do not end your turn while it runs: wait for it.
 2. Act on each line by its **action**, in queue order:
    - `start` → prepare the FR as `${CLAUDE_PLUGIN_ROOT}/skills/start/SKILL.md`
      describes for a **new start**, steps 1, 2 and 4, with two differences:
@@ -77,11 +84,15 @@ FRs:
      `feat`) instead of asking; and when step 2 finds that the code moved in
      the FR's areas since its definition, or `based_on` cannot be checked, do
      not start — `fr.sh project-status <issue> input` and report it: the user
-     decides with `/fr-workflow:start <ID>`. Then `fr.sh launch implement <ID>`.
+     decides with `/fr-workflow:start <ID>`. A worktree hook that fails (step
+     4.5, exit 6) ends this FR for now as that step says — `blocked setup`, no
+     session; the pipeline reports it, `/fr-workflow:start <ID>` resumes it.
+     Otherwise `fr.sh launch implement <ID>`.
    - `ship` → `fr.sh launch ship <ID>`.
    - `fix` → `fr.sh launch fix <ID>`.
    - `report` → one line in your output: FR, phase, detail, and what the user
-     can do. The pipeline reports a state once; do not repeat it.
+     can do — a `waiting` session needs their `claude attach`, never your
+     answer. The pipeline reports a state once; do not repeat it.
    - `wait`, `none` → nothing.
 3. A launch that fails: exit 3 because a session the autopilot did not start
    holds the worktree → find it in `claude agents --json` (its `cwd` is the

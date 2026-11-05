@@ -18,13 +18,26 @@
 
 ```mermaid
 flowchart LR
-  A["your idea"] -->|"/fr-workflow:new"| F["FR issue<br/>full spec"]
-  R["request on GitHub"] -->|"/fr-workflow:new"| F
-  F -->|"/fr-workflow:start"| P["FR doc · branch ·<br/>worktree · session"]
-  P -->|"/fr-workflow:ship"| S["review · PR · CI ·<br/>test deploy · acceptance"]
+  subgraph define["define — the issue is the spec"]
+    A["your idea"] -->|"/fr-workflow:new"| F["FR issue<br/>full spec · on the board"]
+    R["request on GitHub<br/>issue form"] -->|"/fr-workflow:new"| F
+  end
+  subgraph build["build — one worktree per FR"]
+    P["FR doc · branch · worktree<br/>hook: worktree_setup"] -->|"/fr-workflow:implement"| I["commits locally,<br/>never pushes"]
+  end
+  subgraph finish["finish — the gates"]
+    S["/fr-workflow:ship<br/>code + security review · PR · CI ·<br/>test deploy · acceptance"]
+  end
+  F -->|"/fr-workflow:start"| P
+  I -->|"ship session"| S
   S -->|"you merge"| M["merged<br/>FR issue closed"]
-  M -->|"/fr-workflow:done"| C["requests closed<br/>when fully served"]
+  M -->|"/fr-workflow:done<br/>hook: worktree_teardown"| C["requests closed when fully served ·<br/>worktree gone"]
+  S -.->|"a gate stops: you decide —<br/>or the opt-in fix loop"| I
+  M -.->|"autopilot: next wave"| P
 ```
+
+Solid arrows are commands you run; dotted arrows are what `/fr-workflow:autopilot`
+does for you once you hand it a queue — see [three ways to run it](#three-ways-to-run-it).
 
 ## The example used below
 
@@ -207,6 +220,37 @@ now. `/fr-workflow:status #12` shows the FRs of one request,
 `/fr-workflow:status #21` one FR with its PR checks. It points out inconsistencies
 too, such as an FR in review without a PR.
 
+## Three ways to run it
+
+The process is always the same — define, start, implement, ship, merge, done,
+with the same gates and reviews. What you choose is who does the hand-offs
+between the steps.
+
+```mermaid
+flowchart TD
+  Q["How do you want to work today?"]
+  Q -->|"one FR, you at the keyboard"| H["by hand<br/>start #20 → implement → ship → done<br/>you open each session, you see every stop"]
+  Q -->|"several FRs, you at the hand-offs"| B["in parallel<br/>start #20 #22 #23 → one background session per FR of wave 1<br/>you open each ship session, you start the next wave"]
+  Q -->|"a queue, you only merge"| AP["autopilot #20 #21 #22 #23<br/>start, implement, ship per FR · next wave after each merge<br/>fix loop opt-in · you merge, answer, and decide what it reports"]
+```
+
+| Step                     | By hand                     | In parallel (`start` with several FRs) | Autopilot                                                                                                                       |
+| ------------------------ | --------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| define (`new`)           | you                         | you                                    | you                                                                                                                             |
+| start, worktree, hook    | `start #20`                 | `start #20 #22 #23`, wave 1 only       | from its queue, wave by wave                                                                                                    |
+| implementation session   | you open it (`claude -w …`) | started for you, in the background     | started for you                                                                                                                 |
+| ship session             | you open it                 | you open it, per FR                    | started for you once the implementation reports `implemented`                                                                   |
+| a gate stops             | you decide                  | you decide                             | reported to you — with `fix_loop`, red checks and trusted review comments go to a fresh fix session first, then a full new ship |
+| merge                    | you                         | you                                    | you                                                                                                                             |
+| next wave                | `start` again               | `start` again                          | starts itself after your merge                                                                                                  |
+| done (teardown, cleanup) | you                         | you                                    | you                                                                                                                             |
+
+Pick by hand for one FR you want to watch, or when the FR is delicate. Pick
+parallel when a few independent FRs are ready and you will be around for the
+hand-offs. Pick the autopilot for a queue you want to come back to — it never
+merges, never answers a session's question for you, and every stopped gate
+outside the fix loop waits for you.
+
 ## Working in parallel
 
 FRs that do not touch the same code can be built at the same time, each in its
@@ -237,7 +281,8 @@ effort. FRs of later waves are not started; it says why.
 | see FRs and sessions side by side     | `/fr-workflow:status`                                                                |
 
 A background session that needs a permission waits — `claude agents` shows it;
-attach to answer. When a session is done, open its ship session — `start` listed
+attach to answer, or give such sessions a mode that does not ask with
+`session_permission_mode` in the profile (e.g. `auto`). When a session is done, open its ship session — `start` listed
 the command per FR — and run `/fr-workflow:ship`; attaching and running it there
 works too.
 
@@ -272,19 +317,23 @@ autopilot takes those hand-offs over. You keep the merge.
 It checks each FR, puts them in its queue and starts itself as the background
 session **fr-autopilot**. From then on, per FR:
 
-| When                                | It                                                                     |
-| ----------------------------------- | ---------------------------------------------------------------------- |
-| the FR is in wave 1                 | prepares it like `start` and starts its implementation session        |
-| the implementation session is done  | starts the ship session — `ship_model`, all gates                      |
-| a ship stops at a gate              | reports it — or, with `fix_loop`, starts a fix session (see below)     |
-| the PR is ready                     | waits for your merge                                                   |
-| you merged                          | starts the FRs that waited for this one                                |
-| the code moved since the definition | does not start the FR; you decide with `/fr-workflow:start`           |
+| When                                     | It                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------ |
+| the FR is in wave 1                      | prepares it like `start` and starts its implementation session     |
+| the implementation session is done       | starts the ship session — `ship_model`, all gates                  |
+| a ship stops at a gate                   | reports it — or, with `fix_loop`, starts a fix session (see below) |
+| the PR is ready                          | waits for your merge                                               |
+| you merged                               | starts the FRs that waited for this one                            |
+| the code moved since the definition      | does not start the FR; you decide with `/fr-workflow:start`        |
+| a session asks, or ends without a result | reports it: `claude attach <id>`, or `claude logs <id>`            |
 
 **Following it.** `/fr-workflow:autopilot status` shows every queued FR with its
-phase, the next action and what it waits for — the FRs waiting for you first.
-`claude logs fr-autopilot` is its own log, `claude agents` shows every session,
-and a session that asks something waits for `claude attach`. The board, if the
+phase, the next action and what it waits for — the FRs waiting for you first —
+and the autopilot's session id; `claude logs <session id>` is its own log,
+`claude agents` shows every session, and a session that asks something shows as
+`waiting` until you `claude attach` it. Nobody else answers a launched session:
+with the autopilot, set `notify_issues` to `never` or `always` and
+`session_permission_mode` to `auto` in the profile. The board, if the
 project has one, moves as before. `/fr-workflow:autopilot stop` stops the
 autopilot; the sessions it started go on. No background session wanted:
 `/fr-workflow:autopilot --here #20 #21` runs it in your session.

@@ -30,6 +30,7 @@ worktree_teardown:                # command run before done removes the worktree
 autopilot_model: sonnet           # model of the autopilot session — it drives, it does not judge
 autopilot_effort: medium          # low | medium | high | xhigh | max
 autopilot_sessions: 3             # FR sessions the autopilot runs at a time
+session_permission_mode:          # auto | acceptEdits | … — --permission-mode of the sessions launch starts; empty = your default. A background session cannot answer a prompt
 fix_loop: off                     # off | checks | checks+comments — what the autopilot sends back to a fix session
 fix_attempts: 2                   # fix sessions per FR, then it is reported
 fix_skip_checks: []               # checks that never go to the fix loop, e.g. [CodeQL, gitleaks]

@@ -125,9 +125,10 @@ user, with the hook's output in the hand-over.
   claude -w <id-lower>-<slug> --bg --model <model> --effort <effort> -n '<ID> <clean title>' '<prompt>'
   ```
 
-  It prints the session id. If it answers *Workspace not trusted*, the user
-  must run `claude` once in the repository and accept the trust prompt — never
-  work around it.
+  It prints the session id. With `session_permission_mode` in the profile, add
+  `--permission-mode <value>` — a background session cannot answer a prompt.
+  If it answers *Workspace not trusted*, the user must run `claude` once in the
+  repository and accept the trust prompt — never work around it.
 
 `-w` with an existing name opens that worktree on its FR branch; it does not
 create a new one. The quoted values go in **single quotes**, and contain no
