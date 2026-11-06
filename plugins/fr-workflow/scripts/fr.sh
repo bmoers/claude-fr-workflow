@@ -22,6 +22,13 @@
 #                                  start alongside the in-progress ones: waves
 #   fr.sh lock acquire|release|break|status [<ID>]
 #                                  ship lock for a shared test environment
+#   fr.sh deployment <head sha> [--pr <N>]
+#                                  newest GitHub deployment of the PR's commit in
+#                                  a deploy_environment: state, environment, url,
+#                                  id, sha, time — or none (deploy_signal: deployment)
+#   fr.sh pr-commit <sha> <head sha>
+#                                  exit 0 if <sha> is the head or a merge commit
+#                                  of it into the base branch — this PR's commit
 #   fr.sh project-status <issue> <event> [<gate>]
 #                                  record the event in the local FR log, then the
 #                                  FR's status column in the GitHub project, per
@@ -38,6 +45,10 @@
 #                                  the profile's worktree_setup / worktree_teardown
 #                                  in that worktree, the FR in its environment;
 #                                  exit 6 if the hook failed
+#   fr.sh notify <ID|autopilot> <phase> [<detail>]
+#                                  the profile's notify_command with FR_ID, FR_PHASE,
+#                                  FR_DETAIL, FR_SESSION, FR_REPO, FR_MESSAGE in its
+#                                  environment; nothing without the key; exit 6 if it failed
 #   fr.sh project-options [<value>...]
 #                                  add the values of project_status (or the given
 #                                  ones) that the status column does not have yet
@@ -660,6 +671,90 @@ cmd_lock() {
   esac
 }
 
+# This PR's commit? <sha> is the head (or starts with it), or a merge commit of
+# the head into the base branch — what `pull_request` workflows build and
+# deploy: its parents are the head and a commit the base branch contains
+# (compare status ahead or identical), which keeps out another branch that
+# merely merged this one. Exit 1 when it is not; an API failure is an error,
+# never a "no".
+pr_commit() { # <repo> <sha> <head> <base>
+  local parents other status
+  case "$2" in "$3"*) return 0 ;; esac
+  parents=$(gh api "repos/$1/commits/$2" --jq '[.parents[].sha] | join("\t")') || die "cannot read commit $2 of $1"
+  case "$parents" in *"$3"*) ;; *) return 1 ;; esac
+  other=$(printf '%s\n' "$parents" | tr '\t' '\n' | grep -v "^$3" | head -n 1)
+  [ -n "$other" ] || return 1
+  status=$(gh api "repos/$1/compare/$other...$4" --jq .status) || die "cannot compare $other with $4"
+  case "$status" in ahead|identical) return 0 ;; *) return 1 ;; esac
+}
+
+cmd_pr_commit() {
+  [ $# -eq 2 ] || die "usage: fr.sh pr-commit <sha> <head sha>"
+  local PROFILE="$(main_worktree)/$PROFILE"   # the base branch's settings, like deployment
+  if pr_commit "$(cur_repo)" "$1" "$2" "$(cfg base_branch main)"; then echo "this PR's commit"; else echo "not this PR's commit"; exit 1; fi
+}
+
+J_DEPLOY='.[] | [(.id | tostring), .environment, .sha, .created_at] | join("\t")'
+
+# The newest GitHub deployment of a PR's commit, for `deploy_signal:
+# deployment`. Deployments are read, never created. Two lists, both filtered
+# by the API: the head's own deployments (?sha=), and — with the PR number —
+# those of GitHub's test merge commit, which pull_request workflows deploy
+# under refs/pull/N/merge (?ref=); a merge commit still has to pass pr_commit,
+# an older head's merge does not. deploy_environment is required: the newest
+# deployment of a commit may well be production. A glob is matched here, an
+# exact name by the API. Prints one line — state, environment, url, id, sha,
+# time of the latest status; the state is that status's, `pending` when there
+# is none yet — or `none`. The skill polls it: success → the url is the test
+# URL; failure or error → blocked deploy; inactive during the acceptance check
+# → the slot was given to another deployment. Settings from the main
+# checkout's profile, like hook, pipeline and launch.
+cmd_deployment() {
+  local head="" pr="" repo base glob list more row id env sha created st state url updated
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pr) [ $# -ge 2 ] || die "--pr needs the PR number"; pr="$2"; shift ;;
+      -*) die "usage: fr.sh deployment <head sha> [--pr <N>]" ;;
+      *) head="$1" ;;
+    esac
+    shift
+  done
+  printf '%s' "$head" | grep -qE '^[0-9a-f]{40}$' || die "usage: fr.sh deployment <head sha> [--pr <N>] — the full 40-hex sha, the API filters by it"
+  [ -z "$pr" ] || printf '%s' "$pr" | grep -qE '^[0-9]+$' || die "--pr needs the PR number"
+  local PROFILE="$(main_worktree)/$PROFILE"
+  repo=$(cur_repo); base=$(cfg base_branch main)
+  glob=$(cfg deploy_environment "")
+  [ -n "$glob" ] || die "deploy_environment is empty: deploy_signal deployment needs the test environment's name (a glob is fine) — the newest deployment of a commit may be production"
+  case "$glob" in
+    *"{pr}"*) [ -n "$pr" ] || die "deploy_environment names {pr}: pass --pr <N>"; glob=$(printf '%s' "$glob" | sed "s/{pr}/$pr/g") ;;
+  esac
+  # an exact name is a query field (gh encodes it), a glob is matched here
+  case "$glob" in *[\*\?\[]*) set -- ;; *) set -- -f "environment=$glob" ;; esac
+  list=$(gh api -X GET "repos/$repo/deployments" -f "sha=$head" -f per_page=100 "$@" --jq "$J_DEPLOY") || die "cannot list the deployments of $repo"
+  if [ -n "$pr" ]; then
+    more=$(gh api -X GET "repos/$repo/deployments" -f "ref=refs/pull/$pr/merge" -f per_page=100 "$@" --jq "$J_DEPLOY") || die "cannot list the deployments of $repo"
+    list=$(printf '%s\n%s\n' "$list" "$more")
+  fi
+  # newest first; a merge commit is checked only until the first match
+  row=""
+  while IFS=$'\t' read -r id env sha created; do
+    [ -n "$id" ] || continue
+    case "$env" in $glob) ;; *) continue ;; esac
+    pr_commit "$repo" "$sha" "$head" "$base" || continue
+    row=$(printf '%s\t%s\t%s' "$id" "$env" "$sha"); break
+  done <<EOF
+$(printf '%s\n' "$list" | awk -F '\t' 'NF >= 4 && !seen[$1]++' | sort -t "$(printf '\t')" -k4,4r)
+EOF
+  [ -n "$row" ] || { printf 'none\t\t\t\t\t\n'; return 0; }
+  id=$(printf '%s' "$row" | cut -f1); env=$(printf '%s' "$row" | cut -f2); sha=$(printf '%s' "$row" | cut -f3)
+  st=$(gh api "repos/$repo/deployments/$id/statuses?per_page=100" \
+    --jq 'sort_by(.created_at) | if length == 0 then "pending\t\t" else (last | [.state, (.environment_url // ""), .updated_at] | join("\t")) end') ||
+    die "cannot read the statuses of deployment $id"
+  [ -n "$st" ] || st=$(printf 'pending\t\t')
+  state=$(printf '%s' "$st" | cut -f1); url=$(printf '%s' "$st" | cut -f2); updated=$(printf '%s' "$st" | cut -f3)
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$state" "$env" "$url" "$id" "$sha" "$updated"
+}
+
 # The status column of the GitHub project (`project` in the profile) for an
 # FR issue. `project_status` maps the plugin's events to the project's own
 # values ("defined=Ready, running=In progress, …"); an event without a value
@@ -876,6 +971,38 @@ cmd_hook() {
   fi
 }
 
+# A line for the user through the project's notify_command. A background
+# session has no terminal, and Claude Code tells about one that waits only
+# while `claude agents` is open — so the autopilot's `pipeline --wait` calls
+# this for every row that needs the user, and the autopilot for its summary.
+# The command gets FR_ID (or `autopilot`), FR_PHASE, FR_DETAIL, FR_SESSION (the
+# session the autopilot launched last for the FR, if any), FR_REPO and
+# FR_MESSAGE (one line of all of it) in its environment — to be used quoted:
+# the detail carries text from GitHub. Runs in the main checkout, without
+# stdin, with the main checkout's profile. No command → nothing, exit 0; the
+# command fails → its output and exit 6 — never a reason for the caller to stop.
+cmd_notify() { # <ID|autopilot> <phase> [<detail>]
+  [ $# -ge 2 ] && [ $# -le 3 ] || die "usage: fr.sh notify <ID|autopilot> <phase> [<detail>]"
+  local id="$1" phase="$2" detail="${3:-}" main cmd sess="" msg rc
+  local el ev eg ll lk ls nf ap
+  main=$(main_worktree)
+  case "$PROFILE" in /*) ;; *) local PROFILE="$main/$PROFILE" ;; esac   # pipeline has switched already
+  cmd=$(cfg notify_command "")
+  [ -n "$cmd" ] || return 0
+  if [ "$id" != autopilot ]; then
+    id=$(fr_id "$id"); read_facts "$id"
+    [ "$ls" = "-" ] || sess=$ls
+  fi
+  if [ -n "$detail" ]; then msg="$id $phase: $detail"; else msg="$id $phase"; fi
+  if (cd "$main" && FR_ID="$id" FR_PHASE="$phase" FR_DETAIL="$detail" FR_SESSION="$sess"         FR_REPO="$(cur_repo 2>/dev/null || true)" FR_MESSAGE="$msg" bash -c "$cmd" </dev/null); then
+    return 0
+  else
+    rc=$?
+    echo "fr.sh: notify_command failed (exit $rc) for: $msg" >&2
+    return "$HOOK_FAILED"   # a return, not an exit: pipeline --wait goes on after a failed notification
+  fi
+}
+
 # --- autopilot ----------------------------------------------------------------
 #
 # The autopilot drives the FRs in its queue through start → implement → ship,
@@ -965,12 +1092,16 @@ session_pid() { # <session id, or its prefix> → the pid claude agents lists, o
 waiting_row() { printf 'waiting\treport\tthe %s session %s waits for you: claude attach %s\n' "$lk" "$ls" "$ls"; }
 
 # --permission-mode for the sessions launch starts, from the profile's
-# session_permission_mode: one word, or nothing — then the user's own default
-# applies. Validated here, used with "$@" after `set --`.
+# session_permission_mode, or nothing — then the user's own default applies.
+# Only modes that keep Claude Code's checks: the profile is a committed file,
+# and no commit may switch every launched session to bypassPermissions.
 pm_args() {
   local pm; pm=$(cfg session_permission_mode "")
   [ -n "$pm" ] || return 0
-  printf '%s' "$pm" | grep -qE '^[A-Za-z]+$' || die "session_permission_mode must be one word (auto, acceptEdits, …), not '$pm'"
+  case "$pm" in
+    default|acceptEdits|auto|dontAsk) ;;
+    *) die "session_permission_mode must be default, acceptEdits, auto or dontAsk — never bypassPermissions; not '$pm'" ;;
+  esac
   printf -- '--permission-mode\n%s\n' "$pm"
 }
 
@@ -1213,15 +1344,15 @@ pipeline_once() {
 # anyway; --wait 0 returns at once and records what it returned, for a first
 # look. The autopilot wakes for changes, not for every check.
 cmd_pipeline() {
-  local wait="" max=0 nofetch="" out seen t0
+  local wait="" max=0 nofetch="" out seen t0 id phase action detail
   # the autopilot's settings come from the main checkout's profile — the base
   # branch's — wherever this runs; never from the copy on an FR branch
   local PROFILE="$(main_worktree)/$PROFILE"
   while [ $# -gt 0 ]; do
     case "$1" in
       --no-fetch) nofetch=1 ;;
-      --wait) wait="${2:-}"; shift ;;
-      --max) max="${2:-}"; shift ;;
+      --wait) [ $# -ge 2 ] || die "--wait needs seconds"; wait="$2"; shift ;;
+      --max) [ $# -ge 2 ] || die "--max needs seconds"; max="$2"; shift ;;
       *) die "usage: fr.sh pipeline [--no-fetch] [--wait <s> [--max <s>]]" ;;
     esac
     shift
@@ -1239,6 +1370,15 @@ cmd_pipeline() {
     sleep "$wait"
     [ -n "$nofetch" ] || do_fetch
   done
+  # rows that need the user — reports, and a PR waiting for the merge — and are
+  # new since the last result go to the profile's notify_command
+  if [ -n "$(cfg notify_command "")" ]; then
+    printf '%s\n' "$out" | awk -F '\t' 'NR > 1 && ($3 == "report" || ($2 == "review" && $3 == "none"))' |
+      while IFS=$'\t' read -r id phase action detail; do
+        if [ -f "$seen" ] && grep -qxF "$(printf '%s\t%s\t%s\t%s' "$id" "$phase" "$action" "$detail")" "$seen"; then continue; fi
+        cmd_notify "$id" "$phase" "$detail" || true
+      done
+  fi
   printf '%s\n' "$out" > "$seen"
   printf '%s\n' "$out"
 }
@@ -1425,6 +1565,8 @@ case "$cmd" in
   issue-frs) cmd_issue_frs "$@" ;;
   overlap) cmd_overlap "$@" ;;
   lock) cmd_lock "$@" ;;
+  deployment) cmd_deployment "$@" ;;
+  pr-commit) cmd_pr_commit "$@" ;;
   project-status) cmd_project_status "$@" ;;
   project-options) cmd_project_options "$@" ;;
   queue) cmd_queue "$@" ;;
@@ -1432,5 +1574,6 @@ case "$cmd" in
   launch) cmd_launch "$@" ;;
   fix-brief) cmd_fix_brief "$@" ;;
   hook) cmd_hook "$@" ;;
-  *) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  notify) cmd_notify "$@" ;;
+  *) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

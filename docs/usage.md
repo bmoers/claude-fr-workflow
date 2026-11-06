@@ -291,10 +291,10 @@ conflict; `ship` then merges `main` into its branch, or stops if a conflict need
 decision. Whether acceptance checks can run in parallel depends on the test
 environment:
 
-| `test_env` in the profile                | Acceptance checks                                                                                                                                                                                           |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `per-pr` — every PR gets its own preview | in parallel                                                                                                                                                                                                 |
-| `shared` — one deployment at a time      | one after the other: a lock lets one FR at a time from its deploying push to its recorded result; the others wait. With `deploy_signal: url` the deployed commit is also checked before and after the check |
+| `test_env` in the profile                | Acceptance checks                                                                                                                                                                                                           |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `per-pr` — every PR gets its own preview | in parallel                                                                                                                                                                                                                 |
+| `shared` — one deployment at a time      | one after the other: a lock lets one FR at a time from its deploying push to its recorded result; the others wait. With `deploy_signal: url` or `deployment` the deployed commit is also checked before and after the check |
 
 The lock covers the sessions on your machine. Other developers deploying to the
 same shared environment are caught by the commit check — another reason to
@@ -337,6 +337,22 @@ with the autopilot, set `notify_issues` to `never` or `always` and
 project has one, moves as before. `/fr-workflow:autopilot stop` stops the
 autopilot; the sessions it started go on. No background session wanted:
 `/fr-workflow:autopilot --here #20 #21` runs it in your session.
+
+**Hearing from it.** A background session has no terminal, and Claude Code
+tells you that one waits for input or finished only while the agents view
+(`claude agents`) is open in a terminal — keep it open while the autopilot runs,
+or press `←` on an empty prompt in any session to open it; `→` or Enter attaches
+to a session, `claude attach <id>` does the same from a shell, and an attached
+session answers its own prompt. The same view in a browser tab, from any
+machine: a web terminal such as `ttyd -W claude agents` on the machine that
+runs the sessions, bound to localhost and reached through an SSH tunnel. For a
+push anywhere else, set `notify_command`
+in the profile: the autopilot runs it for every FR that needs you — a session at
+a prompt, a stopped gate, a stalled session, a PR waiting for your merge — with
+the message in `$FR_MESSAGE` and its parts in `FR_ID`, `FR_PHASE`, `FR_DETAIL`,
+`FR_SESSION` (see [the profile](profile.md)). `session_permission_mode: auto`
+keeps launched sessions from waiting at permission prompts in the first place;
+`dontAsk` denies instead of waiting.
 
 **Fix loop.** With `fix_loop: checks` in the profile, a red check — the local
 checks or CI — goes to a fresh implementation session instead of to you; with

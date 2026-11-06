@@ -190,6 +190,14 @@ Every fr-workflow skill reads this first.
   in the git directory all worktrees of a clone share, so it covers parallel
   sessions on one machine, not other developers. Against those, the deployed
   commit is checked before and after the acceptance check.
+- `deploy_signal: deployment`: GitHub's own record of the deployment is the
+  signal — `fr.sh deployment` finds the newest deployment of the PR's commit
+  (head, or the merge commit `pull_request` workflows deploy under
+  `refs/pull/N/merge`) in the required `deploy_environment` and reports its
+  latest status and `environment_url`. Read, never created. `fr.sh pr-commit`
+  is the same "this PR's commit" rule for the other signals. With a slot per PR (`test_env: per-pr`) there is no
+  lock; `acceptance_label` on the PR tells the project the slot is in use
+  during the acceptance check.
 
 ## PRs and closing issues
 
@@ -268,6 +276,13 @@ in the user's session with `--here`.
   `session_permission_mode` (e.g. `auto`) goes to every launched session as
   `--permission-mode`; a background session inherits no environment — only
   flags and the project's settings reach it.
+- **It tells you through `notify_command`.** Claude Code notifies about a
+  background session only while `claude agents` is open, so `pipeline --wait`
+  runs the profile's `notify_command` for every row that needs the user and is
+  new since its last result — `report` rows and a PR waiting for the merge —
+  with `FR_ID`, `FR_PHASE`, `FR_DETAIL`, `FR_SESSION`, `FR_REPO` and
+  `FR_MESSAGE` in the environment; `fr.sh notify` runs it for the autopilot's
+  own summary. The channel is the project's; empty means nothing.
 - **One autopilot.** `launch autopilot` refuses (exit 3) while the recorded one
   is busy or waiting, stops one whose loop ended, and starts the new one with
   nothing seen, so its first `pipeline --wait` returns at once. It prints the
@@ -275,9 +290,10 @@ in the user's session with `--here`.
   the name `fr-autopilot` is ambiguous once a second one ran.
 - **Two copies of the profile.** A skill in an FR worktree — `implement`,
   `ship` — reads the FR branch's `.claude/workflow.md`; `fr.sh hook`,
-  `pipeline`, `launch` and `fix-brief` read the main checkout's. A change on the
-  base branch reaches an FR's sessions once its branch has it: merge the base
-  branch into the FR branch, or change the profile before the FR starts.
+  `pipeline`, `launch`, `fix-brief`, `deployment` and `pr-commit` read the
+  main checkout's. A change on the base branch reaches an FR's sessions once
+  its branch has it: merge the base branch into the FR branch, or change the
+  profile before the FR starts.
 - **At most `autopilot_sessions`** FR sessions at a time (default 3); further
   starts wait.
 - **The merge stays the user's.** So do the answers to a session's questions,
@@ -326,11 +342,14 @@ plugin has: the skills themselves never fix what their own gate found.
 | `spec <issue> [<file>]`                                  | the FR doc of an FR issue — to stdout to check it, into a new `<file>` at the start. Exit 4 = not ready, with the reasons                                                                                                                                                                        |
 | `issue-frs <issue>`                                      | the FRs serving a request: `ref state reason via` — `reason` `completed`, `not_planned` or `duplicate` once closed; `via` `self`, `sub` or `requests`                                                                                                                                            |
 | `overlap [<ID>...]`                                      | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now                                                                         |
+| `deployment <head sha> [--pr <N>]`                       | newest GitHub deployment of the PR's commit — head, or with `--pr` a merge commit of it deployed under `refs/pull/N/merge` — in the required `deploy_environment`: `state environment url id sha updated`, or `none`; read-only                                                                  |
+| `pr-commit <sha> <head sha>`                             | exit 0 when `<sha>` is the head or a merge commit of it whose other parent is on the base branch — this PR's commit                                                                                                                                                                              |
 | `lock acquire\|release\|break\|status <ID>`              | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs                                                                                                                                                          |
 | `project-status <issue> <event> [<gate>]`                | appends the event to the FR's local log, then the board column per `project_status`: `defined`, `input`, `running`, `implemented`, `failed`, `blocked`, `approval`, `done`. Exit 5 = board not written, reason on stderr — a line for the report, never a stop                                   |
 | `hook setup\|teardown <ID> <path>`                       | the profile's `worktree_setup` / `worktree_teardown` in that worktree, without stdin, with `FR_ID`, `FR_NUMBER`, `FR_BRANCH`, `FR_WORKTREE`; output passes through. Exit 6 = the hook failed; no hook in the profile = nothing to run, exit 0                                                    |
+| `notify <ID\|autopilot> <phase> [<detail>]`              | the profile's `notify_command` with `FR_ID`, `FR_PHASE`, `FR_DETAIL`, `FR_SESSION`, `FR_REPO`, `FR_MESSAGE` in its environment, in the main checkout, without stdin; nothing without the key; exit 6 when it failed                                                                              |
 | `queue add\|rm\|list\|clear\|session [<ID>...]`          | the autopilot's FRs; `session` = the autopilot's session id                                                                                                                                                                                                                                      |
-| `pipeline [--no-fetch] [--wait <s> [--max <s>]]`         | per queued FR `id phase action detail`; actions `start`, `ship`, `fix`, `report`, `wait`, `none`. `--wait` returns when the result changed since the last one it returned; `--wait 0` returns at once and still records the result                                                               |
+| `pipeline [--no-fetch] [--wait <s> [--max <s>]]`         | per queued FR `id phase action detail`; actions `start`, `ship`, `fix`, `report`, `wait`, `none`. `--wait` returns when the result changed since the last one it returned and runs `notify_command` for new rows that need the user; `--wait 0` returns at once and still records the result     |
 | `launch implement\|fix\|ship <ID> [--replace <session>]` | one background session in the FR's worktree, model by kind; stops the autopilot's own earlier session there first, never an unknown one (exit 3). `launch autopilot` starts the autopilot and prints its session id; exit 3 while the recorded one runs, exit 1 when `claude agents` cannot tell |
 | `fix-brief <ID>`                                         | the brief of the next fix session: the gate, red checks, trusted comments                                                                                                                                                                                                                        |
 | `project-options [<value>...]`                           | adds the values of `project_status` (or the given ones) that the status column lacks; existing options keep id, colour and text. Prints the project's *Workflows* page. Exit 5 = nothing changed, reason on stderr                                                                               |

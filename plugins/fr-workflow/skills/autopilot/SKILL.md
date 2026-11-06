@@ -53,6 +53,9 @@ Arguments: $ARGUMENTS
 
    The session id is the one `launch autopilot` printed (`fr.sh queue session`
    keeps it) — the name `fr-autopilot` is ambiguous once a second autopilot ran.
+   With `notify_command` in the profile, every FR that needs the user reaches
+   them there; without it, Claude Code tells about a waiting background session
+   only while `claude agents` is open — say so.
    And what stays the user's: every merge; answers when a session asks; every
    FR the pipeline reports.
 
@@ -92,7 +95,8 @@ it once and keep waiting; the user acts, the pipeline changes, you go on:
    - `fix` → `fr.sh launch fix <ID>`.
    - `report` → one line in your output: FR, phase, detail, and what the user
      can do — a `waiting` session needs their `claude attach`, never your
-     answer. The pipeline reports a state once; do not repeat it.
+     answer. The pipeline reports a state once and has already run
+     `notify_command` for it; do not repeat it.
    - `wait`, `none` → nothing.
 3. A launch that fails: exit 3 because a session the autopilot did not start
    holds the worktree → find it in `claude agents --json` (its `cwd` is the
@@ -107,7 +111,8 @@ it once and keep waiting; the user acts, the pipeline changes, you go on:
 
 When every FR is `merged` or `dropped`, end with a summary per FR and remind
 the user of `/fr-workflow:done <ID>` for each merged one — closing issues and
-cleaning up stays theirs.
+cleaning up stays theirs — and `fr.sh notify autopilot done "<the summary in
+one line>"`.
 
 **Never** in the loop: merge, approve or close a PR; push; edit code or FR docs;
 answer a session's question; stop a session that is not the autopilot's own or

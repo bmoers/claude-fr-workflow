@@ -129,7 +129,9 @@ point to the `CLAUDE.md` sections instead of copying them.
   `gh label create fr-request -R <repo> --description "Feature request, to be specified"`,
   `gh label create fr -R <repo> --description "Feature request, specified"`. A
   label `fr` that exists with another meaning (French, say) → stop and tell the
-  user: the plugin needs `fr` for FR issues.
+  user: the plugin needs `fr` for FR issues. With `acceptance_label` in the
+  profile, that label as well — `gh pr edit --add-label` needs an existing one:
+  `gh label create <label> -R <repo> --description "Acceptance check running — keep this PR's test slot"`.
 - `.claude/settings.json` — merge into the existing JSON, never drop keys:
 
   ```json

@@ -34,6 +34,11 @@ case "$*" in
   "issue view"*) answer meta ;;
   "api repos/"*/sub_issues*) answer subs ;;
   "api repos/"*/timeline*) answer timeline ;;
+  "api -X GET repos/"*"/deployments -f sha="*) [ ! -f "$STUB/deployments-fails" ] || exit 1; answer deployments-sha ;;
+  "api -X GET repos/"*"/deployments -f ref="*) answer deployments-ref ;;
+  "api repos/"*"/deployments/"*"/statuses"*) answer "statuses-$(printf '%s' "$*" | sed -n 's#.*/deployments/\([0-9]*\)/statuses.*#\1#p')" ;;
+  "api repos/"*"/commits/"*) [ ! -f "$STUB/commits-fails" ] || { echo "API rate limit exceeded" >&2; exit 1; }; answer "commit-$(printf '%s' "$*" | sed -n 's#.*/commits/\([0-9a-f]*\).*#\1#p' | cut -c1-7)" ;;
+  "api repos/"*"/compare/"*) answer compare ;;
   "api repos/"*) answer self ;;
   "project list"*) [ ! -f "$STUB/project-list-fails" ] || { echo "missing scope: project" >&2; exit 1; }; answer projects ;;
   "project item-add"*) [ ! -f "$STUB/item-add-fails" ] || { echo "could not resolve to a node with the global id" >&2; exit 1; } ;;
@@ -603,7 +608,7 @@ nostub agents-fails
 printf -- '---\nsession_permission_mode: "auto --dangerously-skip-permissions"\n---\n' > .claude/workflow.md
 stub agents "$(agents "$SIDAP" idle)"; : > "$CLAUDE_LOG"
 "$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
-check "launch autopilot: a bad session_permission_mode stops before anything is stopped or forgotten" '[ "$rc" = 1 ] && grep -q "one word" "$SP/l.out" && [ ! -s "$CLAUDE_LOG" ] && [ -f "$SEEN" ]' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+check "launch autopilot: a bad session_permission_mode stops before anything is stopped or forgotten" '[ "$rc" = 1 ] && grep -q "never bypassPermissions" "$SP/l.out" && [ ! -s "$CLAUDE_LOG" ] && [ -f "$SEEN" ]' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
 printf -- '---\nsession_permission_mode: auto\n---\n' > .claude/workflow.md
 stub agents "$(agents "$SIDAP" idle)"; : > "$CLAUDE_LOG"
 "$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
@@ -620,8 +625,134 @@ stub agents "$(agents "$SID74" idle "$(cat "$STUB/session.pid")")"
 printf -- '---\nsession_permission_mode: "auto --dangerously-skip-permissions"\n---\n' > .claude/workflow.md
 : > "$CLAUDE_LOG"
 "$FR" launch ship FR-74 > "$SP/l.out" 2>&1; rc=$?
-check "launch: session_permission_mode is one word, or the launch stops before any session is stopped" '[ "$rc" = 1 ] && grep -q "one word" "$SP/l.out" && [ ! -s "$CLAUDE_LOG" ] && kill -0 "$(cat "$STUB/session.pid")" 2>/dev/null' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+check "launch: session_permission_mode outside the allowed modes stops the launch before any session is stopped" '[ "$rc" = 1 ] && grep -q "never bypassPermissions" "$SP/l.out" && [ ! -s "$CLAUDE_LOG" ] && kill -0 "$(cat "$STUB/session.pid")" 2>/dev/null' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+printf -- '---\nsession_permission_mode: bypassPermissions\n---\n' > .claude/workflow.md
+: > "$CLAUDE_LOG"
+"$FR" launch ship FR-74 > "$SP/l.out" 2>&1; rc=$?
+check "launch: bypassPermissions is refused, also from a committed profile" '[ "$rc" = 1 ] && grep -q "never bypassPermissions" "$SP/l.out" && [ ! -s "$CLAUDE_LOG" ]' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
 if [ -f "$STUB/session.pid" ]; then kill "$(cat "$STUB/session.pid")" 2>/dev/null; rm -f "$STUB/session.pid"; fi
+
+# --- deployment: the newest GitHub deployment of the PR's commit (deploy_signal: deployment)
+newrepo "$SP/regress-dep" git@github.com:acme/dep.git
+printf -- '---\ndeploy_environment: "test-slot-*"\n---\n' > .claude/workflow.md
+git add -A; git commit -qm init; git push -q -u origin main
+HEAD=$(printf 'a%.0s' $(seq 1 40)); MERGE=$(printf 'b%.0s' $(seq 1 40)); OTHER=$(printf 'c%.0s' $(seq 1 40)); OLDMERGE=$(printf 'd%.0s' $(seq 1 40)); OLDHEAD=$(printf 'e%.0s' $(seq 1 40))
+# rows as fr.sh's --jq prints them. ?sha= : 7 production 10:00 and 3 test-slot-1 08:00, both the head.
+# ?ref=refs/pull/91/merge : 5 test-slot-2 09:00 (merge of the head), 4 test-slot-2 06:00 (merge of an older head)
+stub deployments-sha "$(printf '7\tproduction\t%s\t2026-11-05T10:00:00Z\n3\ttest-slot-1\t%s\t2026-11-05T08:00:00Z' "$HEAD" "$HEAD")"
+stub deployments-ref "$(printf '5\ttest-slot-2\t%s\t2026-11-05T09:00:00Z\n4\ttest-slot-2\t%s\t2026-11-05T06:00:00Z' "$MERGE" "$OLDMERGE")"
+stub "commit-$(printf '%s' "$MERGE" | cut -c1-7)" "$(printf '%s\t%s' "$OTHER" "$HEAD")"
+stub "commit-$(printf '%s' "$OLDMERGE" | cut -c1-7)" "$(printf '%s\t%s' "$OTHER" "$OLDHEAD")"
+stub compare "ahead"
+stub statuses-5 "$(printf 'success\thttps://slot2.test.example\t2026-11-05T09:05:00Z')"
+stub statuses-3 "$(printf 'pending\t\t')"   # what the --jq prints for a deployment without statuses
+: > "$STUB_LOG"
+"$FR" deployment "$HEAD" --pr 91 > "$SP/d.out" 2>&1; rc=$?
+check "deployment: the newest deployment in a matching environment — the merge commit of the head, deployed under refs/pull/N/merge" '[ "$rc" = 0 ] && [ "$(cat "$SP/d.out")" = "$(printf "success\ttest-slot-2\thttps://slot2.test.example\t5\t%s\t2026-11-05T09:05:00Z" "$MERGE")" ]' "exit $rc: $(cat "$SP/d.out")"
+check "deployment: both lists filtered by the API, production skipped by the glob, one commit read, statuses for the pick only" 'grep -q "^api -X GET repos/acme/dep/deployments -f sha=$HEAD -f per_page=100 --jq" "$STUB_LOG" && grep -q "^api -X GET repos/acme/dep/deployments -f ref=refs/pull/91/merge -f per_page=100 --jq" "$STUB_LOG" && [ "$(grep -c "/commits/" "$STUB_LOG")" = 1 ] && grep -q "deployments/5/statuses" "$STUB_LOG" && ! grep -q "deployments/[37]/statuses" "$STUB_LOG"' "$(cat "$STUB_LOG")"
+stub compare "diverged"
+"$FR" deployment "$HEAD" --pr 91 > "$SP/d.out" 2>&1; rc=$?
+check "deployment: a merge whose other parent is not on the base branch is not this PR's → the next one; no statuses yet = pending" '[ "$rc" = 0 ] && [ "$(cat "$SP/d.out")" = "$(printf "pending\ttest-slot-1\t\t3\t%s\t" "$HEAD")" ]' "exit $rc: $(cat "$SP/d.out")"
+stub compare "ahead"
+# the newest merge deployment belongs to an older head: skipped, the head's own deployment counts
+stub deployments-ref "$(printf '4\ttest-slot-2\t%s\t2026-11-05T09:30:00Z' "$OLDMERGE")"
+check "deployment: a merge commit of an older head does not count" '"$FR" deployment "$HEAD" --pr 91 2>/dev/null | cut -f1,2,4 | grep -qx "pending	test-slot-1	3"' "$("$FR" deployment "$HEAD" --pr 91 2>&1)"
+stub deployments-ref "$(printf '5\ttest-slot-2\t%s\t2026-11-05T09:00:00Z' "$MERGE")"
+check "deployment: without --pr only the head's own deployments are looked at" '"$FR" deployment "$HEAD" 2>/dev/null | cut -f4 | grep -qx 3 && ! grep -q "deployments -f ref=" <(tail -n 3 "$STUB_LOG")' "$("$FR" deployment "$HEAD" 2>&1)"
+stub statuses-3 "$(printf 'inactive\thttps://slot1.test.example\t2026-11-05T08:30:00Z')"
+check "deployment: the latest status counts — inactive" '"$FR" deployment "$HEAD" 2>/dev/null | cut -f1,4 | grep -qx "inactive	3"' "$("$FR" deployment "$HEAD" 2>&1)"
+"$FR" deployment "$(printf "%s" "$HEAD" | cut -c1-7)" > "$SP/d.out" 2>&1; rc=$?
+check "deployment: a short head sha is refused — the API filters by the full one" '[ "$rc" = 1 ] && grep -q "full 40-hex" "$SP/d.out"' "exit $rc: $(cat "$SP/d.out")"
+printf -- '---\ndeploy_environment: test-slot-2\n---\n' > .claude/workflow.md
+: > "$STUB_LOG"
+check "deployment: an exact environment name goes to the API as an encoded query field" '"$FR" deployment "$HEAD" --pr 91 2>/dev/null | cut -f4 | grep -qx 5 && grep -q "deployments -f sha=$HEAD -f per_page=100 -f environment=test-slot-2 --jq" "$STUB_LOG"' "$(cat "$STUB_LOG")"
+printf -- '---\ndeploy_environment: "pr-{pr}"\n---\n' > .claude/workflow.md
+"$FR" deployment "$HEAD" > "$SP/d.out" 2>&1; rc=$?
+check "deployment: {pr} in the environment needs --pr" '[ "$rc" = 1 ] && grep -q "pass --pr" "$SP/d.out"' "exit $rc: $(cat "$SP/d.out")"
+check "deployment: no deployment in the environment → none" '[ "$("$FR" deployment "$HEAD" --pr 91 2>/dev/null)" = "$(printf "none\t\t\t\t\t")" ]' "$("$FR" deployment "$HEAD" --pr 91 2>&1)"
+printf -- '---\n---\n' > .claude/workflow.md
+: > "$STUB_LOG"
+"$FR" deployment "$HEAD" > "$SP/d.out" 2>&1; rc=$?
+check "deployment: deploy_environment is required — the newest deployment may be production; nothing is asked" '[ "$rc" = 1 ] && grep -q "may be production" "$SP/d.out" && ! grep -q "deployments" "$STUB_LOG"' "exit $rc: $(cat "$SP/d.out" "$STUB_LOG")"
+printf -- '---\ndeploy_environment: "test-slot-*"\n---\n' > .claude/workflow.md
+"$FR" deployment nothex > "$SP/d.out" 2>&1; rc=$?
+check "deployment: the head must be a sha" '[ "$rc" = 1 ] && grep -q "usage" "$SP/d.out"' "exit $rc: $(cat "$SP/d.out")"
+"$FR" deployment "$HEAD" --pr > "$SP/d.out" 2>&1; rc=$?
+check "deployment: --pr without a number says so" '[ "$rc" = 1 ] && grep -q "needs the PR number" "$SP/d.out"' "exit $rc: $(cat "$SP/d.out")"
+"$FR" pipeline --no-fetch --wait > "$SP/d.out" 2>&1; rc=$?
+check "pipeline: --wait without seconds says so" '[ "$rc" = 1 ] && grep -q "needs seconds" "$SP/d.out"' "exit $rc: $(cat "$SP/d.out")"
+stub deployments-fails ""
+"$FR" deployment "$HEAD" > "$SP/d.out" 2>&1; rc=$?
+check "deployment: a failing list is an error, not none" '[ "$rc" = 1 ] && grep -q "cannot list" "$SP/d.out"' "exit $rc: $(cat "$SP/d.out")"
+nostub deployments-fails
+stub commits-fails ""
+"$FR" deployment "$HEAD" --pr 91 > "$SP/d.out" 2>&1; rc=$?
+check "deployment: a failing commit lookup (rate limit) is an error, never a 'not this PR'" '[ "$rc" = 1 ] && grep -q "cannot read commit" "$SP/d.out"' "exit $rc: $(cat "$SP/d.out")"
+nostub commits-fails
+# pr-commit: the same rule for the skills' other signals
+check "pr-commit: the head itself, also by prefix" '"$FR" pr-commit "$HEAD" "$(printf "%s" "$HEAD" | cut -c1-7)" >/dev/null 2>&1' "$("$FR" pr-commit "$HEAD" "$HEAD" 2>&1)"
+check "pr-commit: a merge commit of the head whose other parent is on the base branch" '"$FR" pr-commit "$MERGE" "$HEAD" 2>/dev/null | grep -q "^this PR"' "$("$FR" pr-commit "$MERGE" "$HEAD" 2>&1)"
+"$FR" pr-commit "$OLDMERGE" "$HEAD" > "$SP/d.out" 2>&1; rc=$?
+check "pr-commit: a merge of another head → exit 1" '[ "$rc" = 1 ] && grep -q "^not this PR" "$SP/d.out"' "exit $rc: $(cat "$SP/d.out")"
+stub compare "diverged"
+"$FR" pr-commit "$MERGE" "$HEAD" > "$SP/d.out" 2>&1; rc=$?
+check "pr-commit: the other parent off the base branch → exit 1" '[ "$rc" = 1 ]' "exit $rc: $(cat "$SP/d.out")"
+"$FR" bogus > "$SP/d.out" 2>&1; rc=$?
+check "usage: an unknown command prints the whole header, Issue refs included" '[ "$rc" = 2 ] && grep -q "^Issue refs:" "$SP/d.out" && grep -q "fr.sh pr-commit" "$SP/d.out"' "exit $rc: $(tail -n 3 "$SP/d.out")"
+
+# --- notify: the project's notify_command, for what needs the user
+newrepo "$SP/regress-ntf" git@github.com:acme/ntf.git
+printf '.claude/worktrees/\n' > .gitignore
+printf -- '---\n---\n' > .claude/workflow.md
+git add -A; git commit -qm init; git push -q -u origin main
+"$FR" notify FR-90 failed "ci (fix_loop: off)" > "$SP/n.out" 2>&1; rc=$?
+check "notify: no notify_command → nothing, exit 0" '[ "$rc" = 0 ] && [ ! -s "$SP/n.out" ]' "exit $rc: $(cat "$SP/n.out")"
+branch_fr feat/fr-90-n FR-90-n.md FR-90 Ninety in-progress "" "src/n"
+# (branch_fr commits uncommitted changes onto the FR branch: profile edits come after it)
+printf -- '---\nnotify_command: env | grep ^FR_ | sort > "$STUB/notify.env"; pwd >> "$STUB/notify.env"; if read -r x; then echo stdin >> "$STUB/notify.env"; else echo nostdin >> "$STUB/notify.env"; fi; echo sent   # test\n---\n' > .claude/workflow.md
+MAIN=$(pwd -P)
+"$FR" notify '#90' failed "ci (fix_loop: off)" > "$SP/n.out" 2>&1; rc=$?
+check "notify: runs the command in the main checkout with FR_ID, FR_PHASE, FR_DETAIL, FR_SESSION, FR_REPO, FR_MESSAGE, without stdin" '[ "$rc" = 0 ] && [ "$(paste -sd "|" "$STUB/notify.env")" = "FR_DETAIL=ci (fix_loop: off)|FR_ID=FR-90|FR_MESSAGE=FR-90 failed: ci (fix_loop: off)|FR_PHASE=failed|FR_REPO=acme/ntf|FR_SESSION=|$MAIN|nostdin" ] && grep -qx sent "$SP/n.out"' "exit $rc: $(cat "$SP/n.out"; cat "$STUB/notify.env" 2>/dev/null)"
+"$FR" notify autopilot done > "$SP/n.out" 2>&1; rc=$?
+check "notify: the autopilot's own line, without detail" '[ "$rc" = 0 ] && grep -qx "FR_ID=autopilot" "$STUB/notify.env" && grep -qx "FR_MESSAGE=autopilot done" "$STUB/notify.env" && grep -qx "FR_DETAIL=" "$STUB/notify.env"' "exit $rc: $(cat "$STUB/notify.env" 2>/dev/null)"
+LOG90="$(git rev-parse --git-common-dir)/fr-workflow/FR-90.log"
+"$FR" queue add FR-90 >/dev/null
+"$FR" project-status 90 failed ci >/dev/null 2>&1
+printf '%s launch ship sesN90\n' "$(date -u +%s)" >> "$LOG90"
+"$FR" project-status 90 failed review >/dev/null 2>&1
+"$FR" notify FR-90 failed review >/dev/null 2>&1
+check "notify: FR_SESSION is the session the autopilot launched last" 'grep -qx "FR_SESSION=sesN90" "$STUB/notify.env"' "$(cat "$STUB/notify.env" 2>/dev/null)"
+printf -- '---\nnotify_command: exit 3\n---\n' > .claude/workflow.md
+"$FR" notify FR-90 failed review > "$SP/n.out" 2>&1; rc=$?
+check "notify: a failing command → exit 6 with the line it was about" '[ "$rc" = 6 ] && grep -q "notify_command failed (exit 3) for: FR-90 failed: review" "$SP/n.out"' "exit $rc: $(cat "$SP/n.out")"
+"$FR" notify FR-90 > "$SP/n.out" 2>&1; rc=$?
+check "notify: needs a phase" '[ "$rc" = 1 ] && grep -q usage "$SP/n.out"' "exit $rc: $(cat "$SP/n.out")"
+# pipeline --wait: every row that needs the user and is new since the last result is notified once
+printf -- '---\nnotify_command: echo "$FR_MESSAGE" >> "$STUB/notified"\n---\n' > .claude/workflow.md
+rm -f "$STUB/notified" "$(git rev-parse --git-common-dir)/fr-workflow/autopilot.seen"
+"$FR" pipeline --no-fetch --wait 0 > "$SP/w.out" 2>&1; rc=$?
+check "pipeline --wait: a report row goes to notify_command" '[ "$rc" = 0 ] && [ "$(cat "$STUB/notified")" = "FR-90 failed: review" ]' "exit $rc: $(cat "$SP/w.out"; cat "$STUB/notified" 2>/dev/null)"
+"$FR" pipeline --no-fetch --wait 0 >/dev/null 2>&1
+check "pipeline --wait: the same row is not notified twice" '[ "$(wc -l < "$STUB/notified" | tr -d " ")" = 1 ]' "$(cat "$STUB/notified")"
+"$FR" project-status 90 blocked conflict >/dev/null 2>&1
+"$FR" pipeline --no-fetch --wait 0 >/dev/null 2>&1
+check "pipeline --wait: a changed row is notified again" '[ "$(tail -n 1 "$STUB/notified")" = "FR-90 blocked: conflict" ]' "$(cat "$STUB/notified")"
+"$FR" pipeline --no-fetch >/dev/null 2>&1
+check "pipeline without --wait never notifies (status is read-only)" '[ "$(wc -l < "$STUB/notified" | tr -d " ")" = 2 ]' "$(cat "$STUB/notified")"
+printf -- '---\nnotify_command: exit 3\n---\n' > .claude/workflow.md
+"$FR" project-status 90 failed security >/dev/null 2>&1
+"$FR" pipeline --no-fetch --wait 0 > "$SP/w.out" 2>&1; rc=$?
+check "pipeline --wait: a failing notify_command is reported on stderr, the result still comes" '[ "$rc" = 0 ] && grep -q "^FR-90	failed	report	security" "$SP/w.out" && grep -q "notify_command failed" "$SP/w.out"' "exit $rc: $(cat "$SP/w.out")"
+# a PR that waits for the merge needs the user too
+printf -- '---\nnotify_command: echo "$FR_MESSAGE" >> "$STUB/notified"\n---\n' > .claude/workflow.md
+branch_fr feat/fr-91-r FR-91-r.md FR-91 Ninety-one in-review "" "src/r"
+printf -- '---\nnotify_command: echo "$FR_MESSAGE" >> "$STUB/notified"\n---\n' > .claude/workflow.md
+"$FR" queue add FR-91 >/dev/null
+stub prlist "95"; stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tCLEAN\ncheck\tbuild\tpass')"
+"$FR" project-status 91 approval >/dev/null 2>&1
+"$FR" pipeline --no-fetch --wait 0 >/dev/null 2>&1
+check "pipeline --wait: a PR waiting for the merge is notified" 'grep -qx "FR-91 review: PR #95 waits for your merge" "$STUB/notified"' "$(cat "$STUB/notified")"
+nostub prlist; nostub prview
 
 echo "--- $pass passed, $fail failed"
 [ "$fail" = 0 ]

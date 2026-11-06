@@ -11,11 +11,13 @@ notify_issues: ask                # never | ask | always — "ready for acceptan
 review_gate: stop                 # stop | report — what :ship does on code review findings
 security_gate: stop               # stop | report — what :ship does on security review findings
 review_agents: [silent-failure-hunter]   # :ship's extra reviewers, also type-design-analyzer; [] = none
-deploy_signal: none               # none | pr-checks | pr-comment | url
+deploy_signal: none               # none | pr-checks | pr-comment | url | deployment
 deploy_comment_marker:            # pr-comment: text identifying the deploy comment
 deploy_success_marker:            # pr-comment: text that means success
 deploy_version_url:               # url: endpoint whose response contains the deployed commit SHA
 deploy_timeout_min: 30
+deploy_environment:               # deployment, required: the deployment's environment — a name or a glob, test-slot-* or pr-{pr}
+acceptance_label:                 # deployment: PR label set during the acceptance check so the slot stays with this PR; empty = none
 test_env_url:                     # base URL of the test environment; {pr} = PR number
 test_env: shared                  # shared | per-pr — one deployment at a time, or one per PR
 acceptance_browser: playwright    # playwright | none
@@ -30,7 +32,8 @@ worktree_teardown:                # command run before done removes the worktree
 autopilot_model: sonnet           # model of the autopilot session — it drives, it does not judge
 autopilot_effort: medium          # low | medium | high | xhigh | max
 autopilot_sessions: 3             # FR sessions the autopilot runs at a time
-session_permission_mode:          # auto | acceptEdits | … — --permission-mode of the sessions launch starts; empty = your default. A background session cannot answer a prompt
+session_permission_mode:          # auto | acceptEdits | dontAsk | default — --permission-mode of the sessions launch starts; empty = your default; never bypassPermissions
+notify_command:                   # run for every FR the autopilot reports as needing you, FR_MESSAGE etc. in the env, e.g. terminal-notifier -message "$FR_MESSAGE"; empty = nothing
 fix_loop: off                     # off | checks | checks+comments — what the autopilot sends back to a fix session
 fix_attempts: 2                   # fix sessions per FR, then it is reported
 fix_skip_checks: []               # checks that never go to the fix loop, e.g. [CodeQL, gitleaks]

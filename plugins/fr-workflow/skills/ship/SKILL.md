@@ -34,6 +34,13 @@ it; held longer than 120 min, or reported stale → ask the user, and only on th
 word `fr.sh lock break`. Release with `fr.sh lock release <ID>` at the end of
 step 6 — and **before stopping at any gate**, so other FRs are not blocked.
 
+**Acceptance label** (`acceptance_label` in the profile, meant for
+`deploy_signal: deployment` with a slot per PR): the PR carries it from right
+before the first acceptance check to the end of step 5 — `gh pr edit <N>
+--add-label <label>` / `--remove-label <label>` — so the project's deploy
+workflow knows the slot is in use and leaves it alone. Removed **before stopping
+at any gate** as well, like the lock.
+
 **Board status** (`project_status` in the profile; `<issue>` is the FR doc's
 `issue`): `fr.sh project-status <issue> running` once step 0 passed. Whenever
 this skill **stops** before step 7, write why, in the same breath as the
@@ -172,13 +179,11 @@ Other FRs may have been merged meanwhile. `gh pr view <N> --json mergeable,merge
 
 "This PR's commit" is a SHA S that is either the head
 (`gh pr view <N> --json headRefOid -q .headRefOid`) or a merge commit of the head
-into the base branch: its parents (`gh api repos/<repo>/commits/<S> --jq '[.parents[].sha]'`)
-are the head and a commit of the base branch
-(`gh api repos/<repo>/compare/<other parent>...<base_branch> --jq .status` is
-`ahead` or `identical`). `pull_request` workflows build GitHub's test merge
-commit, which GitHub recomputes whenever the base branch moves — so compare by
-parents, not with `merge_commit_sha`. The base-branch condition keeps out another
-branch that merely merged this one.
+into the base branch — `pull_request` workflows build GitHub's test merge
+commit, which GitHub recomputes whenever the base branch moves. Whether a SHA
+is this PR's commit is decided by `fr.sh pr-commit <S> <head sha>` (exit 0: the
+head, or a merge of it whose other parent is on the base branch); never compare
+with `merge_commit_sha`.
 
 - `none` → no test environment: skip this step; step 5 checks locally.
 - `pr-checks` → covered by step 3. Confirm `test_env_url` (`{pr}` replaced)
@@ -199,6 +204,16 @@ branch that merely merged this one.
     — weaker, an in-place edit by an older deploy can still slip through; say so
     in the report.
 - `url` → poll `deploy_version_url` until its response contains this PR's commit.
+- `deployment` → `fr.sh deployment <head sha> --pr <N>`: the newest GitHub
+  deployment of this PR's commit — head or merge commit, the rule above in
+  code — in an environment matching `deploy_environment`. Its first field is
+  the state: `success` → the third field is the test URL for step 5; when it is
+  empty, `test_env_url` with `{pr}` replaced; neither → stop, `input question`:
+  the profile must say where the test environment is. `pending`, `queued`,
+  `in_progress` or `none` → keep waiting; `failure` or `error` → stop,
+  `blocked deploy`; `inactive` → the slot went to another deployment, keep
+  waiting for a new one. An error from the command (API, rate limit) is not
+  `none`: retry at the next interval. Read-only: never create a deployment.
 
 Wait in the background (60 s interval) up to `deploy_timeout_min`. Failure or
 timeout → stop and report. **Never** trigger or re-run a deployment. Then run the
@@ -212,6 +227,13 @@ profile's *Deploy verification* commands, if any — read-only.
   report this PR's commit right **before** the first check and right **after** the
   last. Changed in between → someone else deployed; the results are void — say so
   and run the checks again once this PR is deployed.
+- `deploy_signal: deployment`: set `acceptance_label` on the PR, when the
+  profile names one, right before the first check. `fr.sh deployment` must
+  report the **same deployment id** as `success` right before the first check
+  and right after the last — `inactive`, or another id, means the slot was
+  redeployed in between; the results are void — say so and run the checks again
+  once this PR's deployment is `success` again. Remove the label after the last
+  check.
 - UI with the bundled Playwright browser against the test environment; backend
   effects with the read-only means the profile names. Only the test accounts the
   profile names; none named → ask.

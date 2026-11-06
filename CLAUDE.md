@@ -108,6 +108,19 @@ pitfalls that the code does not show.
   deployments, conflicts, `fix_skip_checks`. PR comments only from
   `OWNER`/`MEMBER`/`COLLABORATOR` or listed bots, since on a public repository
   comments are an injection channel. The skills' own gates still never fix.
+- **Deployment signal** (0.6.1): `deploy_signal: deployment` reads GitHub's
+  Deployment records through `fr.sh deployment`, never creates one. Which
+  commit is "this PR's" — the head, or a merge commit of it whose other parent
+  is on the base branch — is decided in code, the same rule the ship skill
+  states in prose for the other signals. `acceptance_label` is all the plugin
+  does to tell a project that a slot is in use: one label on the PR, set before
+  the acceptance check, removed after it and before any stop.
+- **Notifications** (0.6.1): Claude Code tells about a waiting or finished
+  background session only while `claude agents` is open, and its `Notification`
+  hooks are not documented to fire in `--bg` sessions. So the autopilot's
+  `pipeline --wait` runs the profile's `notify_command` for every row that
+  needs the user and is new since its last result, and `fr.sh notify` for the
+  autopilot's summary — the channel is the project's, the plugin ships no hook.
 - Playwright MCP stays on `@latest` — maintained by Microsoft; accepted trade-off.
 - Jira is not implemented — FRs are GitHub issues. When needed, via Atlassian's
   official MCP server, not own code.
@@ -192,7 +205,8 @@ a new session there.
   run of 0.5 with the board · 0.5.2 `implement`, the pin procedure · 0.5.3 the
   ship session's own model, agents on `opus` · 0.5.4 worktree hooks
   (`worktree_setup` / `worktree_teardown`, `fr.sh hook`) · 0.6 autopilot,
-  opt-in fix loop. Details:
+  opt-in fix loop · 0.6.1 deployment signal (`deploy_signal: deployment`,
+  `acceptance_label`), `notify_command`. Details:
   [CHANGELOG.md](CHANGELOG.md).
 - Before 0.3.0, three `/code-review` rounds found 37, 23 and 19 issues. Recurring
   bug classes: `set -e` exit codes, git path quoting, ref normalization, branch

@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.6.1] — 2026-11-05
+
+### Added
+
+- **`deploy_signal: deployment`:** `ship` takes the test URL from the GitHub
+  Deployment of the PR's commit — the head, or the merge commit `pull_request`
+  workflows build and deploy — whose environment matches `deploy_environment`
+  (a glob; `{pr}` = the PR number). Its latest status is the signal: `success`
+  with `environment_url`; `failure` or `error` is `blocked deploy`; `inactive`
+  during the acceptance check means the slot was redeployed, the results are
+  void. `fr.sh deployment <head sha> [--pr <N>]` reads the head's deployments
+  and, with the PR number, those of GitHub's test merge commit
+  (`refs/pull/N/merge`), both filtered by the API; `deploy_environment` is
+  required — the newest deployment of a commit may be production. Read-only.
+- `fr.sh pr-commit <sha> <head sha>`: whether a SHA is this PR's commit — the
+  head, or a merge commit of it whose other parent is on the base branch — in
+  code; the ship skill no longer spells the rule out for `pr-comment` and `url`.
+  `deployment` and `pr-commit` read the main checkout's profile.
+- **`acceptance_label`:** a PR label `ship` sets right before the acceptance
+  check and removes after it, and before any stop — the project's deploy
+  workflow leaves that PR's slot alone. `init` creates the label.
+- **`notify_command`:** a command the autopilot runs for every FR that needs
+  you — a session waiting at a prompt, a stopped gate, a stalled session, a PR
+  waiting for your merge — with `FR_ID`, `FR_PHASE`, `FR_DETAIL`, `FR_SESSION`,
+  `FR_REPO` and `FR_MESSAGE` in its environment. `pipeline --wait` runs it for
+  rows new since its last result, `fr.sh notify` for the autopilot's summary.
+  Claude Code itself notifies about a waiting background session only while
+  `claude agents` is open; the docs say so.
+
+### Fixed
+
+- `fr.sh pipeline --wait` / `--max` and `fr.sh deployment --pr` as the last
+  argument say what is missing instead of failing silently.
+- `fr.sh` without a known command prints the whole usage header again.
+- `session_permission_mode` accepts `default`, `acceptEdits`, `auto` and
+  `dontAsk` only — `bypassPermissions` from a committed profile is refused.
+
 ## [0.6.0] — 2026-11-04
 
 ### Added
@@ -21,8 +58,9 @@
   `fr.sh fix-brief`.
 - Event `implemented`, written by `:implement` at its hand-over.
 - Profile: `autopilot_model` (`sonnet`), `autopilot_effort` (`medium`),
-  `autopilot_sessions` (3), `session_permission_mode` (empty: your own default)
-  — passed to every launched session as `--permission-mode`; a background
+  `autopilot_sessions` (3), `session_permission_mode` (empty: your own default;
+  `default`, `acceptEdits`, `auto` or `dontAsk`, never `bypassPermissions`) —
+  passed to every launched session as `--permission-mode`; a background
   session inherits no environment and cannot answer a prompt.
 
 ### Changed
