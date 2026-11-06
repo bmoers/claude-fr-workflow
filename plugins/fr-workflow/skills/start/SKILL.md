@@ -25,7 +25,10 @@ From `fr.sh list`, by its id `<fr_prefix>-<number>`:
 - `open` (location `issue`) → a **new start**. `fr.sh spec <issue>` prints the FR
   doc it would write — read it, it is the session's whole brief — or exits 4 with
   the reasons the issue is not ready: leave the FR out, show them; it is
-  finished with `/fr-workflow:new <issue>`.
+  finished with `/fr-workflow:new <issue>`. With `spec_dir`, the spec delta is
+  validated against `origin/<base_branch>` and its `Base:` fingerprints are
+  pinned in the doc — a requirement another FR changed since the definition is
+  such a reason.
 - `in-progress` or `in-review` → **resume**: a worktree may exist
   (`git worktree list`); reuse it, never create a second one. Nothing is pulled
   from the issue — the FR doc is the source.

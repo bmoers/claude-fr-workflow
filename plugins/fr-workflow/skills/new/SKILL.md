@@ -66,6 +66,14 @@ Per issue, what it is:
   whether it retries, what is logged. "Nothing can fail here" is an answer too,
   once checked. Where it matters to the user, make it an acceptance criterion —
   `:ship` reviews the error handling against it.
+- With `spec_dir` in the profile the FR's acceptance section is a **spec
+  delta** (*Spec model* in the model): read the specs of the capabilities the
+  change touches (`<spec_dir>/<capability>/spec.md`), decide per requirement
+  ADDED, MODIFIED, REMOVED or RENAMED, and write every scenario with its
+  evidence — `unit test`, `eval` or `check on test`. A new capability gets a
+  new slug; infrastructure or refactoring without a spec gets `Specs: none` and
+  scenarios only. The scenarios are the acceptance check: write them so someone
+  who did not write the code can run them.
 - New data types, or existing ones reshaped: name their invariants — what must
   always hold, which states are invalid. They go into *Technical notes*.
 - *Technical notes* name the places in the code that change and how the change
@@ -109,14 +117,19 @@ Per issue, what it is:
 *Based on* = `git rev-parse --short=12 origin/<base_branch>`, the commit whose
 code you read.
 
-1. **Body** from `${CLAUDE_PLUGIN_ROOT}/templates/fr.md`, every section filled;
+1. **Body** from `${CLAUDE_PLUGIN_ROOT}/templates/fr.md` — with `spec_dir`, from
+   `${CLAUDE_PLUGIN_ROOT}/templates/fr-delta.md`, whose *Spec delta* replaces
+   the criteria — every section filled;
    *Open questions* says `None.` unless the user left one open on purpose. Keep
    the headings and the Planning keys in English — `fr.sh` reads them; write the
    text in the language of the source — the idea, the file, the request — never
    in English just because this skill is (*Language* in the model). Check it
    against the hard rules before it goes out: no credentials, no personal or
    customer data — requests often hold pasted logs: describe instead of copying.
-   Write it to a temporary file outside the repository.
+   Write it to a temporary file outside the repository. With a spec delta,
+   `fr.sh validate <file>` on that file must pass before the issue goes out —
+   fix what it names (an existing requirement ADDED, a scenario without
+   evidence, text outside the blocks).
 2. **Labels** `fr` and `fr-request` must exist in `<repo>`
    (`gh label list -R <repo> --search fr --json name`). Missing → say so, and
    create one only if the user agrees:

@@ -30,7 +30,7 @@ answer() { if [ -f "$STUB/$1" ]; then cat "$STUB/$1"; fi; }
 case "$*" in
   "auth status") exit 0 ;;
   "issue list"*) [ ! -f "$STUB/list-fails" ] || exit 1; answer issues ;;
-  "issue view"*"--json body"*) answer body ;;
+  "issue view"*"--json body"*) if [ -f "$STUB/body-$3" ]; then answer "body-$3"; else answer body; fi ;;   # gh issue view <n> -R …
   "issue view"*) answer meta ;;
   "api repos/"*/sub_issues*) answer subs ;;
   "api repos/"*/timeline*) answer timeline ;;
@@ -753,6 +753,294 @@ stub prlist "95"; stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tCLEAN\ncheck\tbuil
 "$FR" pipeline --no-fetch --wait 0 >/dev/null 2>&1
 check "pipeline --wait: a PR waiting for the merge is notified" 'grep -qx "FR-91 review: PR #95 waits for your merge" "$STUB/notified"' "$(cat "$STUB/notified")"
 nostub prlist; nostub prview
+
+# --- spec model: delta validation, fingerprints, Base lines at the start
+newrepo "$SP/regress-spec" git@github.com:acme/spec.git
+printf '.claude/worktrees/\n' > .gitignore
+printf -- '---\nspec_dir: specs\n---\n' > .claude/workflow.md
+mkdir -p specs/talent-onboarding
+cat > specs/talent-onboarding/spec.md <<'EOF'
+# Talent onboarding
+
+## Purpose
+
+Onboard talents with their CV.
+
+## Requirements
+
+### Requirement: CV upload
+The system SHALL accept a PDF CV up to 10 MB.
+
+#### Scenario: valid PDF
+- WHEN a talent uploads a 2 MB PDF
+- THEN the upload is accepted
+- Evidence: check on test
+
+#### Scenario: too large
+- WHEN a talent uploads a 12 MB PDF
+- THEN the upload is refused with a size message
+- Evidence: unit test
+
+### Requirement: Remember me
+The system SHALL offer a remember-me option at login.
+
+#### Scenario: ticked
+- WHEN the box is ticked
+- THEN the session lasts 30 days
+- Evidence: unit test
+
+### Requirement: Login
+The system SHALL let a talent log in with e-mail and password.
+
+#### Scenario: wrong password
+- WHEN the password is wrong
+- THEN the login is refused
+- Evidence: unit test
+EOF
+git add -A; git commit -qm init; git push -q -u origin main
+FP_CV=$("$FR" fingerprint talent-onboarding "CV upload" 2>&1); FP_RM=$("$FR" fingerprint talent-onboarding "remember  me" 2>&1); FP_LOGIN=$("$FR" fingerprint talent-onboarding Login 2>&1)
+check "fingerprint: 8 hex of the requirement's text, found by name regardless of case and spacing" 'printf "%s" "$FP_CV" | grep -qE "^[0-9a-f]{8}$" && printf "%s" "$FP_RM" | grep -qE "^[0-9a-f]{8}$" && [ "$FP_CV" != "$FP_RM" ]' "$FP_CV / $FP_RM / $FP_LOGIN"
+"$FR" fingerprint talent-onboarding Nope > "$SP/s.out" 2>&1; rc=$?
+check "fingerprint: an unknown requirement → exit 1" '[ "$rc" = 1 ] && grep -q "no requirement" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+"$FR" fingerprint nope "CV upload" > "$SP/s.out" 2>&1; rc=$?
+check "fingerprint: an unknown capability → exit 1" '[ "$rc" = 1 ]' "exit $rc: $(cat "$SP/s.out")"
+cat > "$SP/delta-ok.md" <<EOF
+## Problem / motivation
+
+Something.
+
+## Spec delta
+
+Specs: talent-onboarding, crm-sync
+
+### ADDED crm-sync: Contact mapping
+The system SHALL map a talent to a CRM contact.
+
+#### Scenario: new talent
+- WHEN a talent is created
+- THEN a CRM contact is created with the same e-mail
+- Evidence: eval — fixtures/crm-sync.json
+
+### MODIFIED talent-onboarding: CV upload
+Base: $FP_CV
+The system SHALL accept a PDF or DOCX CV up to 10 MB.
+
+#### Scenario: valid PDF
+- WHEN a talent uploads a 2 MB PDF
+- THEN the upload is accepted
+- Evidence: check on test
+
+#### Scenario: too large
+- GIVEN a 12 MB file
+- WHEN a talent uploads it
+- THEN the upload is refused with a size message
+- AND nothing is stored
+- Evidence: unit test
+
+#### Scenario: valid DOCX
+- WHEN a talent uploads a DOCX
+- THEN the upload is accepted
+- Evidence: Check on test (staging)
+
+### REMOVED talent-onboarding: Remember me
+Base: $FP_RM
+Reason: replaced by passkeys
+
+### RENAMED talent-onboarding: Login -> Sign in
+Base: $FP_LOGIN
+
+## Planning
+
+- Areas: src/a
+EOF
+"$FR" validate "$SP/delta-ok.md" > "$SP/s.out" 2>&1; rc=$?
+check "validate: a complete delta against origin/main passes; a new capability may be ADDED to" '[ "$rc" = 0 ] && grep -q "^ok: 4 requirement changes, 4 scenarios" "$SP/s.out" && ! grep -q "^error" "$SP/s.out" && ! grep -q "^warning" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+# variants of the valid delta, one defect each
+variant() { sed "$1" "$SP/delta-ok.md" > "$SP/d.md"; "$FR" validate "$SP/d.md" > "$SP/s.out" 2>&1; rc=$?; }
+variant 's/^### ADDED crm-sync: Contact mapping$/### ADDED talent-onboarding: cv   upload/'
+check "validate: ADDED of an existing requirement (case, spacing) → error" '[ "$rc" = 4 ] && grep -q "^error: ADDED talent-onboarding: cv   upload — exists" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^### MODIFIED talent-onboarding: CV upload$/### MODIFIED talent-onboarding: Nope/'
+check "validate: MODIFIED of an unknown requirement → error" '[ "$rc" = 4 ] && grep -q "^error: MODIFIED talent-onboarding: Nope — no such requirement" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant '/^- Evidence: eval/d'
+check "validate: a scenario without evidence → error naming it" '[ "$rc" = 4 ] && grep -q "^error: scenario .new talent. has no .- Evidence" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^- Evidence: eval.*$/- Evidence: manual/'
+check "validate: an evidence outside unit test | eval | check on test → error" '[ "$rc" = 4 ] && grep -q "evidence must be unit test, eval or check on test" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant '/^- THEN a CRM contact/d'
+check "validate: a scenario without THEN → error" '[ "$rc" = 4 ] && grep -q "^error: scenario .new talent. has no .- THEN" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^- WHEN a talent is created$/- SOMETIMES a talent is created/'
+check "validate: a scenario line that is not GIVEN/WHEN/THEN/AND/Evidence → error" '[ "$rc" = 4 ] && grep -q "not a GIVEN/WHEN/THEN/AND/Evidence line" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant '/^#### Scenario: new talent$/,/^- Evidence: eval/d'
+check "validate: ADDED without a scenario → error" '[ "$rc" = 4 ] && grep -q "^error: ADDED crm-sync: Contact mapping — no scenario" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant '/^#### Scenario: too large$/,/^- Evidence: unit test$/d'
+check "validate: MODIFIED that drops a base scenario → a warning with its name, not an error" '[ "$rc" = 0 ] && grep -q "^warning: MODIFIED talent-onboarding: CV upload drops the scenario .too large." "$SP/s.out" && grep -q "^ok: 4 requirement changes, 3 scenarios" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant "s/^Base: $FP_CV$/Base: deadbeef/"
+check "validate: a Base fingerprint that no longer matches → error, the base moved" '[ "$rc" = 4 ] && grep -q "^error: MODIFIED talent-onboarding: CV upload — the requirement changed since the definition (Base: deadbeef, now $FP_CV)" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^Specs: talent-onboarding, crm-sync$/Specs: talent-onboarding, crm-sync\
+Some stray sentence./'
+check "validate: text outside a requirement block → error" '[ "$rc" = 4 ] && grep -q "^error: text outside a requirement block: Some stray" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^### REMOVED talent-onboarding: Remember me$/### Something else/'
+check "validate: a ### that is not a delta heading → error" '[ "$rc" = 4 ] && grep -q "^error: not a delta heading" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^#### Scenario: valid DOCX$/#### Notes/'
+check "validate: an unknown heading inside the delta → error" '[ "$rc" = 4 ] && grep -q "^error: unknown heading in the spec delta: #### Notes" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant '/^Specs: /d'
+check "validate: no Specs line → error" '[ "$rc" = 4 ] && grep -q "^error: no .Specs:. line" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^Specs: talent-onboarding, crm-sync$/Specs: talent-onboarding/'
+check "validate: a block whose capability is not in the Specs line → error" '[ "$rc" = 4 ] && grep -q "^error: ADDED crm-sync: Contact mapping — crm-sync is not in the Specs line" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^Specs: talent-onboarding, crm-sync$/Specs: talent-onboarding, crm-sync, billing/'
+check "validate: a listed capability nothing changes in → warning" '[ "$rc" = 0 ] && grep -q "^warning: billing is in the Specs line but no requirement of it changes" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^Specs: talent-onboarding, crm-sync$/Specs: Talent Onboarding, crm-sync/'
+check "validate: a capability that is not a slug → error" '[ "$rc" = 4 ] && grep -q "is not a slug" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^### RENAMED talent-onboarding: Login -> Sign in$/### RENAMED talent-onboarding: Login/'
+check "validate: RENAMED without old -> new → error" '[ "$rc" = 4 ] && grep -q "RENAMED needs old -> new" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^### RENAMED talent-onboarding: Login -> Sign in$/### RENAMED talent-onboarding: Login -> CV Upload/'
+check "validate: RENAMED to a name that exists → error" '[ "$rc" = 4 ] && grep -q "^error: RENAMED talent-onboarding: Login -> CV Upload — .CV Upload. exists" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant '/^Reason: replaced by passkeys$/d'
+check "validate: REMOVED without a Reason → warning" '[ "$rc" = 0 ] && grep -q "^warning: REMOVED talent-onboarding: Remember me — no .Reason:. line" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^### REMOVED talent-onboarding: Remember me$/### MODIFIED talent-onboarding: CV upload/'
+check "validate: the same requirement twice → error" '[ "$rc" = 4 ] && grep -q "appears twice in the delta" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+variant 's/^## Problem \/ motivation$/## Acceptance criteria\
+\
+- [ ] something/'
+check "validate: acceptance criteria and a spec delta in one document → error" '[ "$rc" = 4 ] && grep -q "^error: both ## Acceptance criteria and ## Spec delta" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+printf '## Problem\n\nx\n\n## Acceptance criteria\n\n- [ ] a\n' > "$SP/d.md"
+"$FR" validate "$SP/d.md" > "$SP/s.out" 2>&1; rc=$?
+check "validate: no spec delta → error (the legacy criteria are not its business)" '[ "$rc" = 4 ] && grep -q "^error: no ## Spec delta" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+cat > "$SP/d.md" <<'EOF'
+## Spec delta
+
+Specs: none
+
+#### Scenario: build is green
+- WHEN the pipeline runs
+- THEN it passes
+- Evidence: check on test
+EOF
+"$FR" validate "$SP/d.md" > "$SP/s.out" 2>&1; rc=$?
+check "validate: Specs: none with scenarios only → ok" '[ "$rc" = 0 ] && grep -q "^ok: 0 requirement changes, 1 scenarios" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+printf '\n### ADDED billing: Invoice\nText.\n\n#### Scenario: s\n- WHEN x\n- THEN y\n- Evidence: eval\n' >> "$SP/d.md"
+"$FR" validate "$SP/d.md" > "$SP/s.out" 2>&1; rc=$?
+check "validate: Specs: none with a requirement change → error" '[ "$rc" = 4 ] && grep -q "allows scenarios only" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+printf '## Spec delta\n\nSpecs: none\n' > "$SP/d.md"
+"$FR" validate "$SP/d.md" > "$SP/s.out" 2>&1; rc=$?
+check "validate: Specs: none without any scenario → error" '[ "$rc" = 4 ] && grep -q "needs at least one scenario" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+# --local reads the working tree's specs: the base moved there
+sub 's/up to 10 MB/up to 20 MB/' specs/talent-onboarding/spec.md
+FP_LOCAL=$("$FR" fingerprint talent-onboarding "CV upload" --local 2>&1)
+check "fingerprint --local: the working tree's text, a different fingerprint" 'printf "%s" "$FP_LOCAL" | grep -qE "^[0-9a-f]{8}$" && [ "$FP_LOCAL" != "$FP_CV" ] && [ "$("$FR" fingerprint talent-onboarding "CV upload" --rev origin/main)" = "$FP_CV" ]' "$FP_LOCAL vs $FP_CV"
+"$FR" validate "$SP/delta-ok.md" --local > "$SP/s.out" 2>&1; rc=$?
+check "validate --local: the pinned Base no longer matches the working tree → error" '[ "$rc" = 4 ] && grep -q "changed since the definition (Base: $FP_CV, now $FP_LOCAL)" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+git checkout -q -- specs
+# the delta in an issue: readiness without criteria, Base lines pinned by spec
+sed '/^Base: /d' "$SP/delta-ok.md" > "$STUB/body"
+stub meta "$(printf 'OPEN\tfr\tCV upload for CRM')"
+"$FR" spec 50 > "$SP/s.out" 2>&1; rc=$?
+check "spec: an issue with a valid spec delta is ready without acceptance criteria" '[ "$rc" = 0 ] && grep -q "^## Spec delta" "$SP/s.out" && ! grep -q "not ready" "$SP/s.out"' "exit $rc: $(head -20 "$SP/s.out")"
+check "spec: Base lines pinned under MODIFIED, REMOVED and RENAMED, none under ADDED" '[ "$(grep -A1 "^### MODIFIED talent-onboarding: CV upload" "$SP/s.out" | tail -n 1)" = "Base: $FP_CV" ] && [ "$(grep -A1 "^### REMOVED" "$SP/s.out" | tail -n 1)" = "Base: $FP_RM" ] && [ "$(grep -A1 "^### RENAMED" "$SP/s.out" | tail -n 1)" = "Base: $FP_LOGIN" ] && [ "$(grep -A1 "^### ADDED" "$SP/s.out" | tail -n 1)" = "The system SHALL map a talent to a CRM contact." ]' "$(grep -A1 "^### " "$SP/s.out")"
+"$FR" spec 50 > "$SP/s2.out" 2>&1
+check "spec: a stale Base line in the issue is replaced, not doubled" '[ "$(grep -c "^Base:" "$SP/s2.out")" = 3 ]' "$(grep -n "^Base:" "$SP/s2.out")"
+sed "s/^Base: $FP_RM$/\\
+Base: $FP_RM/" "$SP/delta-ok.md" > "$STUB/body"
+"$FR" spec 50 > "$SP/s2.out" 2>&1
+check "spec: a Base line further down the block is dropped — one pinned line, right under the heading" '[ "$(grep -c "^Base:" "$SP/s2.out")" = 3 ] && [ "$(grep -A1 "^### REMOVED" "$SP/s2.out" | tail -n 1)" = "Base: $FP_RM" ]' "$(grep -n -B2 "^Base:" "$SP/s2.out")"
+sed 's/^- Evidence: eval.*$/- Evidence: manual/' "$STUB/body" > "$STUB/body.tmp"; mv "$STUB/body.tmp" "$STUB/body"
+"$FR" spec 50 > "$SP/s.out" 2>&1; rc=$?
+check "spec: an invalid delta → not ready, exit 4, with the errors" '[ "$rc" = 4 ] && grep -q "the spec delta has errors" "$SP/s.out" && grep -q "^error: scenario" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+sed '/^Base: /d' "$SP/delta-ok.md" > "$STUB/body"
+printf -- '---\n---\n' > .claude/workflow.md
+"$FR" spec 50 > "$SP/s.out" 2>&1; rc=$?
+check "spec: a delta but no spec_dir in the profile → not ready, says so" '[ "$rc" = 4 ] && grep -q "no spec_dir" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+"$FR" validate "$SP/delta-ok.md" > "$SP/s.out" 2>&1; rc=$?
+check "validate: without spec_dir → exit 1, the spec model is off" '[ "$rc" = 1 ] && grep -q "spec model is off" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+printf -- '---\nspec_dir: specs\n---\n' > .claude/workflow.md
+# validate by FR id: the doc checked out in a worktree
+branch_fr feat/fr-50-cv FR-50-cv.md FR-50 "CV upload for CRM" in-progress "" "src/a"
+printf -- '---\nspec_dir: specs\n---\n' > .claude/workflow.md
+git worktree add -q .claude/worktrees/fr-50-cv feat/fr-50-cv
+( cd .claude/worktrees/fr-50-cv && { cat req/feature-requests/FR-50-cv.md; printf '\n'; sed -n '/^## Spec delta/,/^## Planning/p' "$SP/delta-ok.md" | sed '$d'; } > doc.tmp && mv doc.tmp req/feature-requests/FR-50-cv.md && git add -A && git commit -qm "delta" )
+( cd .claude/worktrees/fr-50-cv && "$FR" validate FR-50 ) > "$SP/s.out" 2>&1; rc=$?
+check "validate FR-50: the FR doc of the worktree, against origin/main" '[ "$rc" = 0 ] && grep -q "^ok: 4 requirement changes" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+"$FR" validate FR-50 > "$SP/s.out" 2>&1; rc=$?
+check "validate FR-50 from the main checkout: the doc is not here → says so" '[ "$rc" = 1 ] && grep -q "no FR doc checked out here" "$SP/s.out"' "exit $rc: $(cat "$SP/s.out")"
+nostub meta; rm -f "$STUB/body"
+
+# --- fold: the delta into the spec files of this checkout
+"$FR" fold "$SP/delta-ok.md" --dry-run > "$SP/f.out" 2>&1; rc=$?
+check "fold --dry-run: lists the operations, writes nothing" '[ "$rc" = 0 ] && grep -q "^would fold MODIFIED talent-onboarding: CV upload" "$SP/f.out" && grep -q "^would fold RENAMED talent-onboarding: Login -> Sign in" "$SP/f.out" && [ -z "$(git status --porcelain specs)" ]' "exit $rc: $(cat "$SP/f.out"; git status --porcelain specs)"
+"$FR" fold "$SP/delta-ok.md" > "$SP/f.out" 2>&1; rc=$?
+check "fold: reports every operation and the changed files" '[ "$rc" = 0 ] && grep -q "^folded ADDED crm-sync: Contact mapping" "$SP/f.out" && grep -q "^changed: specs/talent-onboarding/spec.md" "$SP/f.out" && grep -q "^changed: specs/crm-sync/spec.md" "$SP/f.out"' "exit $rc: $(cat "$SP/f.out")"
+check "fold ADDED: a new capability gets a spec file with title, Purpose and Requirements" '[ "$(grep -E "^#" specs/crm-sync/spec.md | paste -sd "|" -)" = "# Crm Sync|## Purpose|## Requirements|### Requirement: Contact mapping|#### Scenario: new talent" ]' "$(cat specs/crm-sync/spec.md)"
+check "fold ADDED: the requirement text and its scenario lines are copied" 'grep -qxF "The system SHALL map a talent to a CRM contact." specs/crm-sync/spec.md && grep -qxF -- "- Evidence: eval — fixtures/crm-sync.json" specs/crm-sync/spec.md' "$(cat specs/crm-sync/spec.md)"
+check "fold MODIFIED: the requirement body is replaced, scenarios included" 'grep -qx "The system SHALL accept a PDF or DOCX CV up to 10 MB." specs/talent-onboarding/spec.md && ! grep -q "accept a PDF CV up to 10 MB" specs/talent-onboarding/spec.md && grep -qx "#### Scenario: valid DOCX" specs/talent-onboarding/spec.md && [ "$(grep -c "^#### Scenario:" specs/talent-onboarding/spec.md)" = 4 ]' "$(cat specs/talent-onboarding/spec.md)"
+check "fold REMOVED and RENAMED: the requirement is gone, the other has its new heading and its old body" '! grep -q "Remember me" specs/talent-onboarding/spec.md && grep -qx "### Requirement: Sign in" specs/talent-onboarding/spec.md && ! grep -q "^### Requirement: Login" specs/talent-onboarding/spec.md && grep -qx "#### Scenario: wrong password" specs/talent-onboarding/spec.md' "$(cat specs/talent-onboarding/spec.md)"
+check "fold: the file keeps its shape — one blank line between blocks, Purpose untouched, no blank lines at the end" '[ "$(grep -c "^### Requirement:" specs/talent-onboarding/spec.md)" = 2 ] && grep -qx "Onboard talents with their CV." specs/talent-onboarding/spec.md && [ -n "$(tail -n 1 specs/talent-onboarding/spec.md)" ] && ! grep -qE "^$" <(awk "/^$/ { b++; next } { b = 0 } b > 1 { print \"double\" }" specs/talent-onboarding/spec.md)' "$(cat -n specs/talent-onboarding/spec.md)"
+check "fold: the folded spec reads back — fingerprints exist for the new state" '"$FR" fingerprint talent-onboarding "Sign in" --local >/dev/null 2>&1 && "$FR" fingerprint crm-sync "Contact mapping" --local >/dev/null 2>&1' "$("$FR" fingerprint talent-onboarding "Sign in" --local 2>&1)"
+"$FR" fold "$SP/delta-ok.md" > "$SP/f.out" 2>&1; rc=$?
+check "fold twice: the second run finds every change in place — already folded, exit 0, nothing written" '[ "$rc" = 0 ] && grep -q "^already folded" "$SP/f.out" && ! grep -q "^folded" "$SP/f.out"' "exit $rc: $(cat "$SP/f.out")"
+git checkout -q -- specs/talent-onboarding/spec.md
+"$FR" fold "$SP/delta-ok.md" > "$SP/f.out" 2>&1; rc=$?
+check "fold: partly folded (one capability reverted) → exit 4, finish by hand" '[ "$rc" = 4 ] && grep -q "of 4 changes are folded already" "$SP/f.out"' "exit $rc: $(cat "$SP/f.out")"
+git checkout -q -- specs; rm -rf specs/crm-sync
+printf '## Spec delta\n\nSpecs: none\n\n#### Scenario: green\n- WHEN it runs\n- THEN it passes\n- Evidence: check on test\n' > "$SP/d.md"
+"$FR" fold "$SP/d.md" > "$SP/f.out" 2>&1; rc=$?
+check "fold: Specs: none → nothing to fold, exit 0" '[ "$rc" = 0 ] && grep -q "^nothing to fold" "$SP/f.out" && [ -z "$(git status --porcelain specs)" ]' "exit $rc: $(cat "$SP/f.out")"
+sed "s/^Base: $FP_CV$/Base: deadbeef/" "$SP/delta-ok.md" > "$SP/d.md"
+"$FR" fold "$SP/d.md" > "$SP/f.out" 2>&1; rc=$?
+check "fold: an invalid delta writes nothing" '[ "$rc" = 4 ] && [ -z "$(git status --porcelain specs)" ] && [ ! -d specs/crm-sync ]' "exit $rc: $(cat "$SP/f.out"; git status --porcelain)"
+# a replaced block keeps one blank line before the next requirement
+printf '## Spec delta\n\nSpecs: talent-onboarding\n\n### MODIFIED talent-onboarding: CV upload\nBase: %s\nThe system SHALL accept any CV.\n\n#### Scenario: any\n- WHEN a CV comes\n- THEN it is accepted\n- Evidence: unit test\n' "$FP_CV" > "$SP/d.md"
+"$FR" fold "$SP/d.md" > "$SP/f.out" 2>&1; rc=$?
+check "fold MODIFIED: one blank line between the new body and the next requirement" '[ "$rc" = 0 ] && [ "$(awk "/^- Evidence: unit test$/ { f = NR } f && NR == f + 1 { a = \$0 } f && NR == f + 2 { b = \$0; exit } END { print a \"|\" b }" specs/talent-onboarding/spec.md)" = "|### Requirement: Remember me" ]' "exit $rc: $(cat -n specs/talent-onboarding/spec.md | sed -n 5,16p)"
+git checkout -q -- specs
+# a requirement section followed by another section: ADDED goes before it
+cat > specs/talent-onboarding/spec.md <<'EOF'
+# Talent onboarding
+
+## Requirements
+
+### Requirement: CV upload
+The system SHALL accept a PDF CV up to 10 MB.
+
+#### Scenario: valid PDF
+- WHEN a talent uploads a 2 MB PDF
+- THEN the upload is accepted
+- Evidence: check on test
+
+## Notes
+
+Keep this section.
+EOF
+printf '## Spec delta\n\nSpecs: talent-onboarding\n\n### ADDED talent-onboarding: Export\nThe system SHALL export a CV as JSON.\n\n#### Scenario: export\n- WHEN export is requested\n- THEN JSON is returned\n- Evidence: unit test\n' > "$SP/d.md"
+"$FR" fold "$SP/d.md" > "$SP/f.out" 2>&1; rc=$?
+check "fold ADDED: appended to the Requirements section, before a following section" '[ "$rc" = 0 ] && [ "$(grep -E "^### Requirement: Export|^## Notes" specs/talent-onboarding/spec.md | paste -sd "|" -)" = "### Requirement: Export|## Notes" ] && awk "/^$/ { b++; if (b > 1) bad = 1; next } { b = 0 } END { exit bad }" specs/talent-onboarding/spec.md && grep -qx "Keep this section." specs/talent-onboarding/spec.md' "exit $rc: $(cat "$SP/f.out"; cat -n specs/talent-onboarding/spec.md)"
+git checkout -q -- specs
+
+# --- overlap by requirement: two FRs on one requirement never run in parallel
+# FR-50 (branch, areas src/a) changes talent-onboarding: CV upload; #51 (open, src/b) the same requirement, #52 (open, src/c) another one
+mkbody() { printf '## Spec delta\n\nSpecs: talent-onboarding\n\n### %s\n%s\n\n#### Scenario: s\n- WHEN x\n- THEN y\n- Evidence: eval\n\n## Planning\n\n- Areas: %s\n' "$1" "$2" "$3"; }
+stub issues "$(printf '51\tFifty-one\t%s\n52\tFifty-two\t%s' "$(mkbody 'MODIFIED talent-onboarding: cv  UPLOAD' 'Base: x' src/b | tr '\n' '\037')" "$(mkbody 'ADDED talent-onboarding: Export' 'The system SHALL export.' src/c | tr '\n' '\037')")"
+mkbody 'MODIFIED talent-onboarding: cv  UPLOAD' 'Base: x' src/b > "$STUB/body-51"
+mkbody 'ADDED talent-onboarding: Export' 'The system SHALL export.' src/c > "$STUB/body-52"
+"$FR" overlap --no-fetch > "$SP/o.out" 2>&1; rc=$?
+check "overlap: two FRs on the same requirement conflict, named by capability and requirement" '[ "$rc" = 0 ] && grep -q "^conflict	FR-50	FR-51	spec talent-onboarding: cv upload" "$SP/o.out"' "exit $rc: $(cat "$SP/o.out")"
+check "overlap: another requirement of the same capability does not conflict — wave 1 for both" 'grep -q "^wave	1	FR-52" "$SP/o.out" && ! grep -q "^conflict	FR-50	FR-52" "$SP/o.out" && ! grep -q "^conflict	FR-51	FR-52" "$SP/o.out"' "$(cat "$SP/o.out")"
+check "overlap: FR-50 is in progress, so FR-51 waits for it" 'grep -q "^running	FR-50" "$SP/o.out" && grep -q "^wave	2	FR-51" "$SP/o.out"' "$(cat "$SP/o.out")"
+printf -- '---\n---\n' > .claude/workflow.md
+"$FR" overlap --no-fetch > "$SP/o.out" 2>&1
+check "overlap: without spec_dir the requirements play no part" '! grep -q "spec talent-onboarding" "$SP/o.out" && grep -q "^wave	1	FR-51" "$SP/o.out"' "$(cat "$SP/o.out")"
+printf -- '---\nspec_dir: specs\n---\n' > .claude/workflow.md
+nostub issues; rm -f "$STUB/body-51" "$STUB/body-52"
+check "list: the specs column names the requirements an FR's delta changes" '[ "$("$FR" list --no-fetch 2>/dev/null | awk -F "\t" "\$1 == \"FR-50\" { print \$13 }")" = "crm-sync:contact mapping;talent-onboarding:cv upload;talent-onboarding:remember me;talent-onboarding:login" ]' "$("$FR" list --no-fetch 2>&1 | grep FR-50)"
+check "check: names the spec folder and its capabilities" '"$FR" check 2>/dev/null | grep -q "^specs:    specs (1 capabilities"' "$("$FR" check 2>&1)"
+
+# text from a delta reaches awk through the environment, never -v: a backslash sequence in a requirement name stays literal
+branch_fr feat/fr-53-win FR-53-win.md FR-53 "Windows paths" open "" "src/d"
+git switch -q feat/fr-53-win && printf '\n## Spec delta\n\nSpecs: talent-onboarding\n\n### ADDED talent-onboarding: Path C:\\temp\\new\nThe system SHALL accept it.\n\n#### Scenario: s\n- WHEN x\n- THEN y\n- Evidence: eval\n' >> req/feature-requests/FR-53-win.md && git commit -qam "win" && git push -q origin HEAD 2>/dev/null; git switch -q main
+L53=$("$FR" list --no-fetch 2>/dev/null | awk -F "\t" '$1 == "FR-53"')
+check "list: \\t and \\n in a requirement name stay two characters each — no forged column or row" '[ "$(printf "%s\n" "$L53" | wc -l | tr -d " ")" = 1 ] && [ "$(printf "%s\n" "$L53" | cut -f13)" = "talent-onboarding:path c:\\temp\\new" ]' "$L53"
+mkdir -p specs/win-paths && printf '# Win paths\n\n## Requirements\n\n### Requirement: Path C:\\temp\nThe system SHALL accept C:\\temp.\n' > specs/win-paths/spec.md
+FP_WIN=$("$FR" fingerprint win-paths 'Path C:\temp' --local 2>&1); rc=$?
+check "fingerprint: a requirement name with a backslash is found — the name is not escape-processed" '[ "$rc" = 0 ] && printf "%s" "$FP_WIN" | grep -qE "^[0-9a-f]{8}$"' "exit $rc: $FP_WIN"
+rm -rf specs/win-paths
 
 echo "--- $pass passed, $fail failed"
 [ "$fail" = 0 ]

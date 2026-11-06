@@ -48,7 +48,8 @@ Every fr-workflow skill reads this first.
 
 - Body sections from `${CLAUDE_PLUGIN_ROOT}/templates/fr.md`: *Problem /
   motivation*, *Desired behaviour*, *Failure behaviour*, *Scope*, *Acceptance
-  criteria*, *Technical notes*, *Open questions*, *Planning* — and, when a
+  criteria* — or, with `spec_dir`, *Spec delta* (*Spec model* below) —
+  *Technical notes*, *Open questions*, *Planning* — and, when a
   request was rewritten, its original text at the end in
   `<details><summary>Original request</summary>`.
 - `fr.sh` reads *Planning*:
@@ -79,8 +80,9 @@ Every fr-workflow skill reads this first.
   on your own; the quoted comment texts in the skills are templates to render in
   that language. Only the headings and the Planning keys stay English — `fr.sh`
   reads them. Sources in different languages → ask.
-- **Ready to start:** open, label `fr`, at least one acceptance criterion, no
-  items under *Open questions*. `fr.sh spec` refuses anything else.
+- **Ready to start:** open, label `fr`, at least one acceptance criterion or a
+  spec delta that `fr.sh validate` accepts, no items under *Open questions*.
+  `fr.sh spec` refuses anything else.
 
 ## FR document
 
@@ -88,7 +90,9 @@ Every fr-workflow skill reads this first.
   `req/feature-requests/FR-47-coupons-in-checkout.md`. `fr.sh spec` writes it at
   the start: the issue's sections verbatim — without *Planning*, which becomes
   the frontmatter, and without the original request, which may hold customer
-  data (never in a commit) — plus `## Acceptance check` for `:ship`.
+  data (never in a commit) — plus `## Acceptance check` for `:ship`; `:implement` adds `## Tasks` and ticks
+  them. With a spec delta, `fr.sh spec` pins every MODIFIED, REMOVED and RENAMED
+  block to the base branch's requirement with a `Base:` fingerprint.
 - Frontmatter, flat, one line per key, lists on one line:
 
   ```yaml
@@ -331,28 +335,100 @@ plugin has: the skills themselves never fix what their own gate found.
   checkout's** profile wherever they run — the settings of the base branch,
   never those on an FR branch.
 
+## Spec model
+
+Opt-in with `spec_dir` in the profile — empty means off, and nothing below
+applies.
+
+- **One living spec per capability**, `<spec_dir>/<capability>/spec.md`, in
+  OpenSpec's shape: `# Title`, `## Purpose`, `## Requirements`, then
+  `### Requirement: <Name>` with a SHALL/MUST sentence and `#### Scenario:
+  <Name>` blocks of `- GIVEN` / `- WHEN` / `- THEN` / `- AND` lines. The
+  capability is the folder's slug; a requirement is identified by its name,
+  compared without case and spacing.
+- **An FR carries a spec delta** instead of acceptance criteria — the same
+  section in the issue before the start and in the FR doc after:
+
+  ```markdown
+  ## Spec delta
+
+  Specs: talent-onboarding, crm-sync
+
+  ### ADDED crm-sync: Contact mapping
+  The system SHALL map a talent to a CRM contact.
+
+  #### Scenario: new talent
+  - WHEN a talent is created
+  - THEN a CRM contact with the same e-mail exists
+  - Evidence: eval — fixtures/crm-sync.json
+
+  ### MODIFIED talent-onboarding: CV upload
+  Base: 9e32a4b3
+  The system SHALL accept a PDF or DOCX CV up to 10 MB.
+  (the complete new text, scenarios included)
+
+  ### REMOVED talent-onboarding: Remember me
+  Base: d6bbb0a3
+  Reason: replaced by passkeys
+
+  ### RENAMED talent-onboarding: Login -> Sign in
+  Base: a09d473b
+  ```
+
+  Flat: one requirement per `###`, operation, capability and name in the
+  heading; English keywords, because `fr.sh` parses them. `Specs: none` means
+  scenarios only — infrastructure, a refactoring — and nothing is folded. Every
+  scenario names its **evidence**: `unit test`, `eval` or `check on test`
+  (details after a dash); the scenarios are the acceptance check of `:ship`.
+- **`fr.sh validate`** checks a delta against the base branch's specs (the
+  working tree's with `--local`): a scenario with WHEN, THEN and evidence per
+  ADDED and MODIFIED requirement; MODIFIED, REMOVED and RENAMED name an
+  existing requirement, ADDED a new one — case and spacing do not make it new;
+  the `Base:` fingerprint still matches, else another FR changed the
+  requirement and the delta is redone, never merged blindly; text under an
+  unknown heading or outside a block is an error. A MODIFIED that drops a
+  scenario of the base requirement, and a REMOVED without `Reason:`, are
+  warnings.
+- **Fingerprints:** `fr.sh fingerprint <capability> <requirement>` is 8 hex of
+  the requirement's text at `origin/<base_branch>`, spacing ignored. `fr.sh
+  spec` pins them as `Base:` at the start; `validate` compares.
+- **Fold:** `fr.sh fold <ID>` applies the delta to the spec files of the FR's
+  worktree — ADDED appends, MODIFIED replaces, REMOVED deletes, RENAMED
+  renames; a new capability gets a new file with a *Purpose* to write. `:ship`
+  folds after its review gate and before the first push, as its own commit: the
+  PR shows the spec change beside the code, the FR doc keeps the delta. Never a
+  commit on the base branch.
+- **Overlap by requirement:** two FRs that change the same requirement never
+  run in parallel (`fr.sh overlap` says `spec <capability>: <requirement>`);
+  other requirements of one capability may.
+- Documents with `## Acceptance criteria` keep working, with or without
+  `spec_dir`; one document has one of the two.
+
 ## Script
 
 `${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh`, from anywhere inside the repository:
 
-| Command                                                  | Does                                                                                                                                                                                                                                                                                             |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `check`                                                  | prerequisites and profile                                                                                                                                                                                                                                                                        |
-| `list`                                                   | all FRs as TSV: `id status location ref path pr issue requests title areas model effort`                                                                                                                                                                                                         |
-| `spec <issue> [<file>]`                                  | the FR doc of an FR issue — to stdout to check it, into a new `<file>` at the start. Exit 4 = not ready, with the reasons                                                                                                                                                                        |
-| `issue-frs <issue>`                                      | the FRs serving a request: `ref state reason via` — `reason` `completed`, `not_planned` or `duplicate` once closed; `via` `self`, `sub` or `requests`                                                                                                                                            |
-| `overlap [<ID>...]`                                      | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now                                                                         |
-| `deployment <head sha> [--pr <N>]`                       | newest GitHub deployment of the PR's commit — head, or with `--pr` a merge commit of it deployed under `refs/pull/N/merge` — in the required `deploy_environment`: `state environment url id sha updated`, or `none`; read-only                                                                  |
-| `pr-commit <sha> <head sha>`                             | exit 0 when `<sha>` is the head or a merge commit of it whose other parent is on the base branch — this PR's commit                                                                                                                                                                              |
-| `lock acquire\|release\|break\|status <ID>`              | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs                                                                                                                                                          |
-| `project-status <issue> <event> [<gate>]`                | appends the event to the FR's local log, then the board column per `project_status`: `defined`, `input`, `running`, `implemented`, `failed`, `blocked`, `approval`, `done`. Exit 5 = board not written, reason on stderr — a line for the report, never a stop                                   |
-| `hook setup\|teardown <ID> <path>`                       | the profile's `worktree_setup` / `worktree_teardown` in that worktree, without stdin, with `FR_ID`, `FR_NUMBER`, `FR_BRANCH`, `FR_WORKTREE`; output passes through. Exit 6 = the hook failed; no hook in the profile = nothing to run, exit 0                                                    |
-| `notify <ID\|autopilot> <phase> [<detail>]`              | the profile's `notify_command` with `FR_ID`, `FR_PHASE`, `FR_DETAIL`, `FR_SESSION`, `FR_REPO`, `FR_MESSAGE` in its environment, in the main checkout, without stdin; nothing without the key; exit 6 when it failed                                                                              |
-| `queue add\|rm\|list\|clear\|session [<ID>...]`          | the autopilot's FRs; `session` = the autopilot's session id                                                                                                                                                                                                                                      |
-| `pipeline [--no-fetch] [--wait <s> [--max <s>]]`         | per queued FR `id phase action detail`; actions `start`, `ship`, `fix`, `report`, `wait`, `none`. `--wait` returns when the result changed since the last one it returned and runs `notify_command` for new rows that need the user; `--wait 0` returns at once and still records the result     |
-| `launch implement\|fix\|ship <ID> [--replace <session>]` | one background session in the FR's worktree, model by kind; stops the autopilot's own earlier session there first, never an unknown one (exit 3). `launch autopilot` starts the autopilot and prints its session id; exit 3 while the recorded one runs, exit 1 when `claude agents` cannot tell |
-| `fix-brief <ID>`                                         | the brief of the next fix session: the gate, red checks, trusted comments                                                                                                                                                                                                                        |
-| `project-options [<value>...]`                           | adds the values of `project_status` (or the given ones) that the status column lacks; existing options keep id, colour and text. Prints the project's *Workflows* page. Exit 5 = nothing changed, reason on stderr                                                                               |
+| Command                                                           | Does                                                                                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `check`                                                           | prerequisites and profile                                                                                                                                                                                                                                                                        |
+| `list`                                                            | all FRs as TSV: `id status location ref path pr issue requests title areas model effort`; last column `specs`: the requirements the FR's spec delta changes, `capability:name;…`                                                                                                                 |
+| `spec <issue> [<file>]`                                           | the FR doc of an FR issue — to stdout to check it, into a new `<file>` at the start. Exit 4 = not ready, with the reasons                                                                                                                                                                        |
+| `issue-frs <issue>`                                               | the FRs serving a request: `ref state reason via` — `reason` `completed`, `not_planned` or `duplicate` once closed; `via` `self`, `sub` or `requests`                                                                                                                                            |
+| `overlap [<ID>...]`                                               | `running ID` (every `in-progress` FR — always the context), `conflict A B reason`, `wave N ID` for the candidates (default: all `open` FRs). Wave 1 = overlaps neither a running FR nor another wave-1 FR: can start now                                                                         |
+| `deployment <head sha> [--pr <N>]`                                | newest GitHub deployment of the PR's commit — head, or with `--pr` a merge commit of it deployed under `refs/pull/N/merge` — in the required `deploy_environment`: `state environment url id sha updated`, or `none`; read-only                                                                  |
+| `pr-commit <sha> <head sha>`                                      | exit 0 when `<sha>` is the head or a merge commit of it whose other parent is on the base branch — this PR's commit                                                                                                                                                                              |
+| `lock acquire\|release\|break\|status <ID>`                       | ship lock for a shared test environment; `acquire` exits 3 when another FR holds it; `break` only after the user confirmed no ship runs                                                                                                                                                          |
+| `project-status <issue> <event> [<gate>]`                         | appends the event to the FR's local log, then the board column per `project_status`: `defined`, `input`, `running`, `implemented`, `failed`, `blocked`, `approval`, `done`. Exit 5 = board not written, reason on stderr — a line for the report, never a stop                                   |
+| `hook setup\|teardown <ID> <path>`                                | the profile's `worktree_setup` / `worktree_teardown` in that worktree, without stdin, with `FR_ID`, `FR_NUMBER`, `FR_BRANCH`, `FR_WORKTREE`; output passes through. Exit 6 = the hook failed; no hook in the profile = nothing to run, exit 0                                                    |
+| `notify <ID\|autopilot> <phase> [<detail>]`                       | the profile's `notify_command` with `FR_ID`, `FR_PHASE`, `FR_DETAIL`, `FR_SESSION`, `FR_REPO`, `FR_MESSAGE` in its environment, in the main checkout, without stdin; nothing without the key; exit 6 when it failed                                                                              |
+| `validate <issue\|ID\|file> [--rev <rev> \| --local]`             | the spec delta against the base branch's specs (`spec_dir`): `error:` / `warning:` / `ok:` lines, exit 4 on errors                                                                                                                                                                               |
+| `fingerprint <capability> <requirement> [--rev <rev> \| --local]` | 8 hex of the requirement's text — what a MODIFIED/REMOVED/RENAMED block pins as `Base:`; exit 1 when there is no such requirement                                                                                                                                                                |
+| `fold <ID\|file> [--dry-run]`                                     | the spec delta into this checkout's spec files, validated against them first — nothing is written on errors (exit 4); prints the operations and the changed files                                                                                                                                |
+| `queue add\|rm\|list\|clear\|session [<ID>...]`                   | the autopilot's FRs; `session` = the autopilot's session id                                                                                                                                                                                                                                      |
+| `pipeline [--no-fetch] [--wait <s> [--max <s>]]`                  | per queued FR `id phase action detail`; actions `start`, `ship`, `fix`, `report`, `wait`, `none`. `--wait` returns when the result changed since the last one it returned and runs `notify_command` for new rows that need the user; `--wait 0` returns at once and still records the result     |
+| `launch implement\|fix\|ship <ID> [--replace <session>]`          | one background session in the FR's worktree, model by kind; stops the autopilot's own earlier session there first, never an unknown one (exit 3). `launch autopilot` starts the autopilot and prints its session id; exit 3 while the recorded one runs, exit 1 when `claude agents` cannot tell |
+| `fix-brief <ID>`                                                  | the brief of the next fix session: the gate, red checks, trusted comments                                                                                                                                                                                                                        |
+| `project-options [<value>...]`                                    | adds the values of `project_status` (or the given ones) that the status column lacks; existing options keep id, colour and text. Prints the project's *Workflows* page. Exit 5 = nothing changed, reason on stderr                                                                               |
 
 `location` is `issue` (not started; `ref` is the issue), `base`, `branch` (then
 `ref` is the branch) or `local` (uncommitted in this checkout). `list` and

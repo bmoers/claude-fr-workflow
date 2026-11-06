@@ -52,6 +52,14 @@
 #   fr.sh project-options [<value>...]
 #                                  add the values of project_status (or the given
 #                                  ones) that the status column does not have yet
+#   fr.sh validate <issue|ID|file> [--rev <rev> | --local]
+#                                  the spec delta against the base branch's specs
+#                                  (spec_dir): error/warning lines; exit 4 on errors
+#   fr.sh fingerprint <capability> <requirement> [--rev <rev> | --local]
+#                                  what a MODIFIED/REMOVED/RENAMED block pins as Base:
+#   fr.sh fold <ID|file> [--dry-run]
+#                                  apply the FR's spec delta to the spec files of
+#                                  this checkout; nothing on errors (exit 4)
 #
 # Issue refs: owner/repo#12, #12, 12 or FR-12 (issue repo), a GitHub issue URL.
 
@@ -222,8 +230,12 @@ parse_fm() {
 
 # emit <location> <ref> <path>   (frontmatter on stdin)
 emit() {
-  parse_fm | awk -v loc="$1" -v ref="$2" -v p="$3" 'BEGIN { FS = OFS = "\t" }
-    { print $1, $2, loc, ref, p, $3, $4, $5, $6, $7, $8, $9 }'
+  local doc items
+  doc=$(cat)
+  items=$(printf '%s\n' "$doc" | awk "$NN_AWK$ITEMS_AWK"'{ b = b (NR > 1 ? "\n" : "") $0 } END { print delta_items(b, "\n") }')
+  # items through the environment: awk -v would turn a \t or \n in a requirement name into a column or a row
+  printf '%s\n' "$doc" | parse_fm | items="$items" awk -v loc="$1" -v ref="$2" -v p="$3" 'BEGIN { FS = OFS = "\t"; items = ENVIRON["items"] }
+    { print $1, $2, loc, ref, p, $3, $4, $5, $6, $7, $8, $9, items }'
 }
 
 # awk: planning(body, sep) reads the `## Planning` section of an FR issue body,
@@ -254,6 +266,28 @@ PLAN_AWK='
     return o
   }'
 
+# awk: nn(s) — a requirement name as compared everywhere: lowercase, one space
+# between words. delta_items(b, sep) — the requirements an FR's spec delta
+# changes, "capability:name;…", from a body whose lines are joined by sep;
+# the thirteenth column of a row, so overlap never reads a body twice.
+NN_AWK='function nn(s) { s = tolower(s); gsub(/[ \t]+/, " ", s); sub(/^ /, "", s); sub(/ $/, "", s); return s }
+'
+ITEMS_AWK='
+  function delta_items(b, sep,   L, n, i, l, on, fence, h, cap, name, out) {
+    n = split(b, L, sep); out = ""; on = 0; fence = 0
+    for (i = 1; i <= n; i++) {
+      l = L[i]; sub(/\r$/, "", l)
+      if (l ~ /^ *(```|~~~)/) fence = !fence
+      if (fence) continue
+      if (l ~ /^## /) { h = tolower(l); sub(/^## +/, "", h); sub(/ +$/, "", h); on = (h == "spec delta"); continue }
+      if (!on || l !~ /^### +(ADDED|MODIFIED|REMOVED|RENAMED) +[a-z0-9][a-z0-9-]*: *[^ ]/) continue
+      h = l; sub(/^### +[A-Z]+ +/, "", h); cap = h; sub(/:.*$/, "", cap); name = h; sub(/^[^:]*: */, "", name)
+      if (l ~ /^### +RENAMED /) sub(/ -> .*$/, "", name)
+      out = out (out == "" ? "" : ";") cap ":" nn(name)
+    }
+    return out
+  }'
+
 # jq: one issue per line, fields tab-separated, the body's lines joined by \037
 # (unit separator) — unambiguous, unlike @tsv's escapes. J_ROW for
 # `gh issue list` (number title body), J_REST for REST issue objects
@@ -281,11 +315,11 @@ issue_rows() {
     echo "fr.sh: warning: $ISSUE_LIMIT open FR issues or more — the list is cut" >&2
   fi
   dr_init
-  printf '%s\n' "$out" | awk -v dr="$DR" -v pre="$PREFIX" "$NORM_AWK$PLAN_AWK"'
+  printf '%s\n' "$out" | awk -v dr="$DR" -v pre="$PREFIX" "$NORM_AWK$PLAN_AWK$NN_AWK$ITEMS_AWK"'
     BEGIN { FS = OFS = "\t" }
     {
       planning($3, "\037"); r = canon("#" $1)
-      print pre "-" $1, "open", "issue", r, "", "", r, reqs(P["requests"]), $2, csv(P["areas"]), P["model"], P["effort"]
+      print pre "-" $1, "open", "issue", r, "", "", r, reqs(P["requests"]), $2, csv(P["areas"]), P["model"], P["effort"], delta_items($3, "\037")
     }'
 }
 
@@ -385,14 +419,14 @@ rows() {
       for (i = 1; i <= n; i++) {
         split(row[order[i]], c, "\t")
         if (c[3] == "base" && c[2] == "in-review") c[2] = "merged"
-        print c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11], c[12]
+        print c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11], c[12], c[13]
       }
     }' | sort
 }
 
 want_fetch() { case " $* " in *" --no-fetch "*) ;; *) do_fetch ;; esac; }
 
-HEADER='id\tstatus\tlocation\tref\tpath\tpr\tissue\trequests\ttitle\tareas\tmodel\teffort\n'
+HEADER='id\tstatus\tlocation\tref\tpath\tpr\tissue\trequests\ttitle\tareas\tmodel\teffort\tspecs\n'
 
 cmd_list() {
   want_fetch "$@"
@@ -409,6 +443,7 @@ cmd_spec() {
   [ $# -ge 1 ] || die "usage: fr.sh spec <issue> [<file>]"
   command -v gh >/dev/null || die "gh not found"
   local ref out="${2:-}" meta body doc rc=0
+  local PROFILE="$(main_worktree)/$PROFILE"   # spec_dir as validate and fold read it
   ref=$(issue_ref "$1")
   if [ -n "$out" ]; then
     out=$(caller_path "$out")
@@ -418,7 +453,7 @@ cmd_spec() {
     --jq "[.state, ([.labels[].name] | join(\",\")), $J_TITLE] | join(\"\t\")") || die "cannot read $ref"
   body=$(gh issue view "${ref##*#}" -R "${ref%%#*}" --json body --jq '.body // ""') || die "cannot read $ref"
   dr_init
-  doc=$(printf '%s\n' "$body" | awk -v meta="$meta" -v ref="$ref" -v dr="$DR" -v pre="$PREFIX" \
+  doc=$(printf '%s\n' "$body" | meta="$meta" awk -v ref="$ref" -v dr="$DR" -v pre="$PREFIX" \
       -v today="$(date +%Y-%m-%d)" "$NORM_AWK$PLAN_AWK"'
     function opens(s) { return gsub(/<details/, "&", s) }
     function closes(s) { return gsub(/<\/details>/, "&", s) }
@@ -432,7 +467,7 @@ cmd_spec() {
     }
     { sub(/\r$/, ""); L[++n] = $0; all = all (n > 1 ? "\n" : "") $0 }
     END {
-      split(meta, M, "\t"); num = ref; sub(/^.*#/, "", num)
+      split(ENVIRON["meta"], M, "\t"); num = ref; sub(/^.*#/, "", num)   # the title is issue text: no -v, no escape processing
       if (M[1] != "OPEN") fail("the issue is closed")
       if (("," M[2] ",") !~ /,fr,/) fail("no label fr — not defined yet: /fr-workflow:new " ref)
       # pass 1: criteria and open questions; # lines in code blocks are no headings
@@ -440,11 +475,12 @@ cmd_spec() {
         l = L[i]
         if (original(l)) continue
         if (l ~ /^ *(```|~~~)/) fence = !fence
-        if (!fence && l ~ /^#+ /) { sec = tolower(l); sub(/^#+ +/, "", sec); sub(/ +$/, "", sec); continue }
+        if (!fence && l ~ /^#+ /) { sec = tolower(l); sub(/^#+ +/, "", sec); sub(/ +$/, "", sec); if (sec == "spec delta") delta = 1; continue }
         if (sec == "acceptance criteria" && l ~ /^[-*] \[[ xX]\] +[^ ]/ && l !~ /\] +Criterion [0-9]+ *$/) crit++
         if (sec == "open questions" && l ~ /^([-*]|[0-9]+\.) +[^ ]/) oq++
       }
-      if (!crit) fail("no acceptance criteria (- [ ] lines under ## Acceptance criteria)")
+      if (!crit && !delta) fail("no acceptance criteria (- [ ] lines under ## Acceptance criteria) and no ## Spec delta")
+      if (crit && delta) fail("both ## Acceptance criteria and ## Spec delta — one of them")
       if (oq) fail(oq " open question(s) under ## Open questions")
       if (bad != "") { print "fr.sh: " ref " is not ready to start:" bad > "/dev/stderr"; exit 4 }
       planning(all, "\n")
@@ -471,6 +507,17 @@ cmd_spec() {
       printf "\n## Acceptance check\n\nFilled in by `/fr-workflow:ship`.\n"
     }') || rc=$?
   [ "$rc" = 0 ] || exit "$rc"
+  # a spec delta: valid against the base branch's specs, and pinned to them
+  if printf '%s\n' "$body" | grep -qiE '^## +spec delta *$'; then
+    local vout
+    SPEC_DIR=$(cfg spec_dir "")
+    [ -n "$SPEC_DIR" ] || { echo "fr.sh: $ref is not ready to start: it has a spec delta, but the profile has no spec_dir" >&2; exit 4; }
+    if ! vout=$(validate_text "$body" "$(base_ref)"); then
+      printf '%s\n' "$vout" >&2; echo "fr.sh: $ref is not ready to start: the spec delta has errors" >&2; exit 4
+    fi
+    printf '%s\n' "$vout" | grep '^warning' >&2 || true
+    doc=$(printf '%s\n' "$doc" | add_base_lines "$(base_ref)")
+  fi
   if [ -z "$out" ]; then printf '%s\n' "$doc"; return 0; fi
   mkdir -p "$(dirname "$out")"
   printf '%s\n' "$doc" > "$out"
@@ -588,9 +635,10 @@ cmd_overlap() {
   while read -r role id; do
     row=$(printf '%s\n' "$ROWS" | awk -F '\t' -v id="$id" '$1 == id')
     if [ -z "$row" ]; then echo "fr.sh: no such FR: $id" >&2; continue; fi
-    touched "$row" | awk -v id="$id" -v role="$role" '{ print role "\t" id "\t" $0 }'
+    { touched "$row"; spec_items "$row"; } | awk -v id="$id" -v role="$role" '{ print role "\t" id "\t" $0 }'
   done | awk -v shared="$shared" '
     function rel(a, b) { return a == b || index(b, a "/") == 1 || index(a, b "/") == 1 }
+    function isspec(a) { return substr(a, 1, 5) == "spec:" }
     function under(p, s) { return p == s || index(p, s "/") == 1 }
     BEGIN { FS = OFS = "\t"; ns = split(shared, sh, " ") }
     { if (!($2 in seen)) { order[++n] = $2; seen[$2] = 1; role[$2] = $1 }; paths[$2] = paths[$2] "\n" $3 }
@@ -600,6 +648,10 @@ cmd_overlap() {
         na = split(substr(paths[A], 2), pa, "\n"); nb = split(substr(paths[B], 2), pb, "\n")
         for (x = 1; x <= na && why == ""; x++) for (y = 1; y <= nb && why == ""; y++) {
           if (pa[x] == "*" || pb[y] == "*") why = "areas unknown"
+          else if (isspec(pa[x]) || isspec(pb[y])) {
+            # the same requirement of a spec; a requirement never relates to a path
+            if (pa[x] == pb[y]) { why = pa[x]; sub(/^spec:/, "spec ", why); sub(/:/, ": ", why) }
+          }
           else if (rel(pa[x], pb[y])) why = pa[x] " ~ " pb[y]
           else for (s = 1; s <= ns && why == ""; s++)
             if (under(pa[x], sh[s]) && under(pb[y], sh[s])) why = "shared " sh[s]
@@ -1001,6 +1053,442 @@ cmd_notify() { # <ID|autopilot> <phase> [<detail>]
     echo "fr.sh: notify_command failed (exit $rc) for: $msg" >&2
     return "$HOOK_FAILED"   # a return, not an exit: pipeline --wait goes on after a failed notification
   fi
+}
+
+# --- spec model ---------------------------------------------------------------
+#
+# With `spec_dir` in the profile a project keeps one living spec per
+# capability, `<spec_dir>/<capability>/spec.md`, in OpenSpec's shape: `# Title`,
+# `## Purpose`, `## Requirements`, `### Requirement: Name` with a SHALL sentence,
+# `#### Scenario: Name` with GIVEN/WHEN/THEN/AND lines. An FR then carries a
+# **spec delta** instead of acceptance criteria — in the issue before the start,
+# in the FR doc after — flat, one requirement per heading, English keywords
+# because this script parses them:
+#
+#   ## Spec delta
+#   Specs: talent-onboarding, crm-sync          Specs: none = scenarios only
+#   ### ADDED <capability>: <requirement>       the full requirement text + scenarios
+#   ### MODIFIED <capability>: <requirement>    Base: <fingerprint>, the full new text
+#   ### REMOVED <capability>: <requirement>     Base: <fingerprint>, Reason: …
+#   ### RENAMED <capability>: <old> -> <new>    Base: <fingerprint>
+#   #### Scenario: <name>                       - WHEN … - THEN … - Evidence: unit test | eval | check on test
+#
+# The scenarios are the acceptance check, each naming its evidence. `validate`
+# checks a delta against the base branch's specs; `fingerprint` hashes a
+# requirement so the FR doc pins what MODIFIED/REMOVED/RENAMED refer to (`spec`
+# writes the Base lines at the start, `validate` stops when the base moved);
+# `fold` applies the delta to the spec files. Settings from the main checkout's
+# profile.
+
+EVIDENCE_RE='^(unit test|eval|check on test)([ :(-].*)?$'
+
+# the delta of a markdown text (stdin) as records: specs<T>list · block<T>n<T>op<T>cap<T>name<T>new
+# · base<T>n<T>fp · text<T>n<T>line (the block's content, Base excluded) · scen<T>n<T>name<T>evidence
+# <T>whens<T>thens (evidence "-" = none) · err<T>message · nodelta · criteria (a ## Acceptance criteria section exists)
+DELTA_AWK='
+BEGIN { n = 0; none = 0; sn = 0; found = 0; crit = 0; fence = 0; d = 0 }
+function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+function opens(s) { return gsub(/<details/, "&", s) }
+function closes(s) { return gsub(/<\/details>/, "&", s) }
+function original(l) {
+  if (d > 0) { d += opens(l) - closes(l); return 1 }
+  if (l ~ /^<details> *<summary> *Original request/) { d = opens(l) - closes(l); return 1 }
+  return 0
+}
+function flush_scen() { if (sn) printf "scen\t%s\t%s\t%s\t%s\t%s\n", n, sname, (ev == "" ? "-" : ev), whens, thens; sn = 0 }
+{
+  sub(/\r$/, "")
+  if (original($0)) next
+  if ($0 ~ /^ *(```|~~~)/) { fence = !fence; if (insec && n) printf "text\t%s\t%s\n", n, $0; next }
+  if (fence) { if (insec && n) printf "text\t%s\t%s\n", n, $0; next }
+  if ($0 ~ /^## /) {
+    s = tolower(trim(substr($0, 4))); flush_scen()
+    insec = (s == "spec delta"); if (insec) found = 1
+    if (s == "acceptance criteria") crit = 1
+    next
+  }
+  if (!insec) next
+  if ($0 ~ /^#### +Scenario:/) {
+    flush_scen()
+    if (!n && !none) { printf "err\ta scenario before any requirement block: %s\n", $0; next }
+    sn = 1; sname = trim(substr($0, index($0, ":") + 1)); ev = ""; whens = 0; thens = 0
+    if (n) printf "text\t%s\t%s\n", n, $0
+    next
+  }
+  if ($0 ~ /^### /) {
+    flush_scen(); h = trim(substr($0, 5)); n++
+    if (h ~ /^(ADDED|MODIFIED|REMOVED|RENAMED) +[a-z0-9][a-z0-9-]*: *[^ ]/) {
+      op = h; sub(/ .*$/, "", op); rest = trim(substr(h, length(op) + 1))
+      cap = rest; sub(/:.*$/, "", cap); name = trim(substr(rest, index(rest, ":") + 1)); new = ""
+      if (op == "RENAMED") {
+        if (name ~ / -> /) { new = name; sub(/^.* -> /, "", new); sub(/ -> .*$/, "", name); new = trim(new); name = trim(name) }
+        else printf "err\tRENAMED needs old -> new: %s\n", $0
+      }
+      printf "block\t%s\t%s\t%s\t%s\t%s\n", n, op, cap, name, new
+    } else printf "err\tnot a delta heading (### ADDED|MODIFIED|REMOVED|RENAMED <capability>: <requirement>): %s\n", $0
+    next
+  }
+  if ($0 ~ /^#+ /) { printf "err\tunknown heading in the spec delta: %s\n", $0; next }
+  if ($0 ~ /^[ \t]*$/) { if (n) printf "text\t%s\t\n", n; next }
+  if (!n && !sn) {
+    if ($0 ~ /^Specs: */) { v = trim(substr($0, 7)); printf "specs\t%s\n", v; if (tolower(v) == "none") none = 1; next }
+    printf "err\ttext outside a requirement block: %s\n", $0; next
+  }
+  if (sn) {
+    if ($0 ~ /^- *[Ee]vidence:/) {
+      e = tolower(trim(substr($0, index($0, ":") + 1)))
+      if (e ~ EVRE) ev = e; else printf "err\tscenario %s: the evidence must be unit test, eval or check on test: %s\n", sname, $0
+    } else if ($0 ~ /^- *WHEN /) whens++
+    else if ($0 ~ /^- *THEN /) thens++
+    else if ($0 !~ /^- *(GIVEN|AND) /) printf "err\tscenario %s: not a GIVEN/WHEN/THEN/AND/Evidence line: %s\n", sname, $0
+    if (n) printf "text\t%s\t%s\n", n, $0
+    next
+  }
+  if ($0 ~ /^Base: */) { printf "base\t%s\t%s\n", n, trim(substr($0, 6)); next }
+  printf "text\t%s\t%s\n", n, $0
+}
+END { flush_scen(); if (!found) print "nodelta"; if (crit) print "criteria" }'
+
+# a spec file (stdin) as records: req<T>name · scen<T>name · line<T>text (the requirement body) · end
+SPEC_AWK='
+function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+{
+  sub(/\r$/, "")
+  if ($0 ~ /^ *(```|~~~)/) fence = !fence
+  if (!fence && $0 ~ /^### +Requirement:/) { if (inreq) print "end"; inreq = 1; print "req\t" trim(substr($0, index($0, ":") + 1)); next }
+  if (!fence && $0 ~ /^##? /) { if (inreq) print "end"; inreq = 0; next }
+  if (inreq) { if (!fence && $0 ~ /^#### +Scenario:/) print "scen\t" trim(substr($0, index($0, ":") + 1)); print "line\t" $0 }
+}
+END { if (inreq) print "end" }'
+
+SPEC_DIR=""
+spec_profile() { # the main checkout's profile, spec_dir into SPEC_DIR; dies without one
+  SPEC_DIR=$(cfg spec_dir "")
+  [ -n "$SPEC_DIR" ] || die "no spec_dir in the profile — the spec model is off"
+}
+nname() { s="$1" awk "$NN_AWK"'BEGIN { print nn(ENVIRON["s"]) }'; }   # not -v: it would process backslash escapes in the name
+# the fingerprint of a requirement's body (stdin): 8 hex of its text with the
+# lines trimmed and blank lines dropped — spacing never changes it, words do
+fp() { awk '{ sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); if ($0 != "") print }' | git hash-object --stdin | cut -c1-8; }
+# the spec of a capability at <rev>, or in the working tree with `-`
+spec_file() { # <rev|-> <cap>
+  if [ "$1" = "-" ]; then
+    local top; top=$(git rev-parse --show-toplevel)
+    [ -f "$top/$SPEC_DIR/$2/spec.md" ] || return 1
+    cat "$top/$SPEC_DIR/$2/spec.md"
+  else
+    git show "$1:$SPEC_DIR/$2/spec.md" 2>/dev/null
+  fi
+}
+# the requirements of a capability's spec: name<T>normalized name<T>fingerprint<T>scenario names (\036-joined)
+spec_reqs() { # <rev|-> <cap>
+  local src kind rest name="" body="" scen="" us
+  us=$(printf '\036')
+  src=$(spec_file "$1" "$2") || return 1
+  printf '%s\n' "$src" | awk "$SPEC_AWK" | {
+    while IFS=$'\t' read -r kind rest; do
+      case "$kind" in
+        req) name=$rest; body=""; scen="" ;;
+        scen) scen="$scen${scen:+$us}$rest" ;;
+        line) body="$body$rest"$'\n' ;;
+        end) printf '%s\t%s\t%s\t%s\n' "$name" "$(nname "$name")" "$(printf '%s' "$body" | fp)" "$scen" ;;
+      esac
+    done
+  }
+}
+
+cmd_fingerprint() { # <cap> <requirement> [--rev <rev> | --local]
+  local cap="" name="" rev="" row
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --rev) [ $# -ge 2 ] || die "--rev needs a revision"; rev="$2"; shift ;;
+      --local) rev="-" ;;
+      -*) die "usage: fr.sh fingerprint <capability> <requirement> [--rev <rev> | --local]" ;;
+      *) if [ -z "$cap" ]; then cap="$1"; elif [ -z "$name" ]; then name="$1"; else die "usage: fr.sh fingerprint <capability> <requirement> [--rev <rev> | --local]"; fi ;;
+    esac
+    shift
+  done
+  [ -n "$cap" ] && [ -n "$name" ] || die "usage: fr.sh fingerprint <capability> <requirement> [--rev <rev> | --local]"
+  local PROFILE="$(main_worktree)/$PROFILE"
+  spec_profile
+  [ -n "$rev" ] || rev=$(base_ref)
+  row=$(spec_reqs "$rev" "$cap" | n="$(nname "$name")" awk -F '\t' 'BEGIN { n = ENVIRON["n"] } $2 == n && !f { print; f = 1 }') || true
+  [ -n "$row" ] || die "no requirement '$name' in $cap at ${rev/-/the working tree}"
+  printf '%s\n' "$row" | cut -f3
+}
+
+# validate_text <text> <rev|->: error:/warning:/ok: lines; return 4 on errors
+validate_text() {
+  local text="$1" rev="$2" recs errs=0 nblk nscen specs="" none=0 caps=" " used=" " seen=" " n op cap name new base reqs row fpnow bscen s ns k c us
+  us=$(printf '\036')
+  recs=$(printf '%s\n' "$text" | awk -v EVRE="$EVIDENCE_RE" "$DELTA_AWK")
+  if printf '%s\n' "$recs" | grep -qx nodelta; then echo "error: no ## Spec delta section"; return 4; fi
+  if printf '%s\n' "$recs" | grep -qx criteria; then echo "error: both ## Acceptance criteria and ## Spec delta — one of them"; errs=$((errs + 1)); fi
+  while IFS=$'\t' read -r k rest; do
+    if [ "$k" = err ]; then echo "error: $rest"; errs=$((errs + 1)); fi
+  done <<EOF
+$recs
+EOF
+  specs=$(printf '%s\n' "$recs" | awk -F '\t' '$1 == "specs" && !f { print $2; f = 1 }')
+  if [ -z "$specs" ]; then echo "error: no 'Specs:' line — the capabilities the delta touches, or 'Specs: none'"; errs=$((errs + 1))
+  elif [ "$(nname "$specs")" = none ]; then none=1
+  else
+    for c in $(printf '%s' "$specs" | tr ',' ' '); do
+      case "$c" in
+        [a-z0-9]*) printf '%s' "$c" | grep -qE '^[a-z0-9][a-z0-9-]*$' || { echo "error: capability '$c' is not a slug (lowercase letters, digits, -)"; errs=$((errs + 1)); } ;;
+        *) echo "error: capability '$c' is not a slug (lowercase letters, digits, -)"; errs=$((errs + 1)) ;;
+      esac
+      caps="$caps$c "
+    done
+  fi
+  while IFS=$'\t' read -r k n op cap name new; do
+    [ "$k" = block ] || continue
+    if [ "$none" = 1 ]; then echo "error: $op $cap: $name — 'Specs: none' allows scenarios only, no requirement changes"; errs=$((errs + 1)); continue; fi
+    case "$caps" in *" $cap "*) ;; *) echo "error: $op $cap: $name — $cap is not in the Specs line"; errs=$((errs + 1)) ;; esac
+    used="$used$cap "
+    case "$seen" in *" $cap:$(nname "$name") "*) echo "error: $op $cap: $name — the requirement appears twice in the delta"; errs=$((errs + 1)) ;; esac
+    seen="$seen$cap:$(nname "$name") "
+    reqs=$(spec_reqs "$rev" "$cap") || reqs=""
+    row=$(printf '%s\n' "$reqs" | n="$(nname "$name")" awk -F '\t' 'BEGIN { n = ENVIRON["n"] } $2 == n && !f { print; f = 1 }')
+    base=$(printf '%s\n' "$recs" | n="$n" awk -F '\t' 'BEGIN { n = ENVIRON["n"] } $1 == "base" && $2 == n && !f { print $3; f = 1 }')
+    case "$op" in
+      ADDED)
+        [ -z "$row" ] || { echo "error: ADDED $cap: $name — exists in $cap already (as '$(printf '%s' "$row" | cut -f1)'); MODIFIED?"; errs=$((errs + 1)); } ;;
+      MODIFIED|REMOVED|RENAMED)
+        if [ -z "$reqs" ]; then echo "error: $op $cap: $name — no spec $SPEC_DIR/$cap/spec.md at ${rev/-/the working tree}"; errs=$((errs + 1))
+        elif [ -z "$row" ]; then echo "error: $op $cap: $name — no such requirement in $cap"; errs=$((errs + 1))
+        else
+          fpnow=$(printf '%s' "$row" | cut -f3)
+          if [ -n "$base" ] && [ "$base" != "$fpnow" ]; then
+            echo "error: $op $cap: $name — the requirement changed since the definition (Base: $base, now $fpnow): redo the delta against the current spec"; errs=$((errs + 1))
+          fi
+          if [ "$op" = MODIFIED ]; then
+            bscen=$(printf '%s' "$row" | cut -f4)
+            if [ -n "$bscen" ]; then
+              printf '%s\n' "$bscen" | tr "$us" '\n' | while IFS= read -r s; do
+                [ -n "$s" ] || continue
+                printf '%s\n' "$recs" | n="$n" awk -F '\t' 'BEGIN { n = ENVIRON["n"] } $1 == "scen" && $2 == n { print $3 }' | while IFS= read -r ns; do nname "$ns"; echo; done | grep -xF "$(nname "$s")" >/dev/null ||
+                  echo "warning: MODIFIED $cap: $name drops the scenario '$s' of the base requirement — on purpose?"
+              done
+            fi
+          fi
+          if [ "$op" = RENAMED ]; then
+            if [ -z "$new" ]; then echo "error: RENAMED $cap: $name — needs 'old -> new'"; errs=$((errs + 1))
+            elif printf '%s\n' "$reqs" | n="$(nname "$new")" awk -F '\t' 'BEGIN { n = ENVIRON["n"] } $2 == n { f = 1 } END { exit !f }'; then
+              echo "error: RENAMED $cap: $name -> $new — '$new' exists in $cap already"; errs=$((errs + 1))
+            fi
+          fi
+          if [ "$op" = REMOVED ] && ! printf '%s\n' "$recs" | n="$n" awk -F '\t' 'BEGIN { n = ENVIRON["n"] } $1 == "text" && $2 == n && $3 ~ /^Reason:/ { f = 1 } END { exit !f }'; then
+            echo "warning: REMOVED $cap: $name — no 'Reason:' line"
+          fi
+        fi ;;
+    esac
+    if [ "$op" = ADDED ] || [ "$op" = MODIFIED ]; then
+      if ! printf '%s\n' "$recs" | n="$n" awk -F '\t' 'BEGIN { n = ENVIRON["n"] } $1 == "scen" && $2 == n { f = 1 } END { exit !f }'; then
+        echo "error: $op $cap: $name — no scenario (#### Scenario: … with WHEN, THEN and Evidence)"; errs=$((errs + 1))
+      fi
+    fi
+  done <<EOF
+$recs
+EOF
+  # every scenario needs its evidence, a WHEN and a THEN
+  while IFS=$'\t' read -r k n name ev whens thens; do
+    [ "$k" = scen ] || continue
+    [ "$ev" != "-" ] || { echo "error: scenario '$name' has no '- Evidence: unit test | eval | check on test' line"; errs=$((errs + 1)); }
+    [ "${whens:-0}" -gt 0 ] || { echo "error: scenario '$name' has no '- WHEN' line"; errs=$((errs + 1)); }
+    [ "${thens:-0}" -gt 0 ] || { echo "error: scenario '$name' has no '- THEN' line"; errs=$((errs + 1)); }
+  done <<EOF
+$recs
+EOF
+  if [ "$none" = 1 ] && ! printf '%s\n' "$recs" | grep -q '^scen	'; then echo "error: 'Specs: none' needs at least one scenario"; errs=$((errs + 1)); fi
+  for c in $caps; do case "$used" in *" $c "*) ;; *) echo "warning: $c is in the Specs line but no requirement of it changes" ;; esac; done
+  if [ "$errs" = 0 ]; then
+    nblk=$(printf '%s\n' "$recs" | grep -c '^block	' || true); nscen=$(printf '%s\n' "$recs" | grep -c '^scen	' || true)
+    echo "ok: $nblk requirement changes, $nscen scenarios"
+    return 0
+  fi
+  return 4
+}
+
+# the text whose delta is meant: a file, an FR id (its doc, checked out here), or an issue
+delta_source() {
+  local path row top
+  if [ -f "$(caller_path "$1")" ]; then cat "$(caller_path "$1")"; return 0; fi
+  if printf '%s' "$1" | grep -qE "^$PREFIX-[0-9]+$"; then
+    row=$(rows | awk -F '\t' -v id="$1" '$1 == id') || true
+    [ -n "$row" ] || die "no such FR: $1"
+    path=$(printf '%s' "$row" | cut -f5); top=$(git rev-parse --show-toplevel)
+    [ -n "$path" ] && [ -f "$top/$path" ] || die "$1 has no FR doc checked out here — run this in its worktree, or name the issue"
+    cat "$top/$path"; return 0
+  fi
+  local ref; ref=$(issue_ref "$1")
+  gh issue view "${ref##*#}" -R "${ref%%#*}" --json body --jq '.body // ""' || die "cannot read $ref"
+}
+
+cmd_validate() { # <issue|ID|file> [--rev <rev> | --local]
+  local what="" rev="" text out rc=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --rev) [ $# -ge 2 ] || die "--rev needs a revision"; rev="$2"; shift ;;
+      --local) rev="-" ;;
+      -*) die "usage: fr.sh validate <issue|ID|file> [--rev <rev> | --local]" ;;
+      *) what="$1" ;;
+    esac
+    shift
+  done
+  [ -n "$what" ] || die "usage: fr.sh validate <issue|ID|file> [--rev <rev> | --local]"
+  local PROFILE="$(main_worktree)/$PROFILE"
+  spec_profile
+  [ -n "$rev" ] || rev=$(base_ref)
+  text=$(delta_source "$what")
+  out=$(validate_text "$text" "$rev") || rc=$?
+  printf '%s\n' "$out"
+  return "$rc"
+}
+
+# Base: <fingerprint> under every MODIFIED/REMOVED/RENAMED heading of a doc
+# (stdin), replacing one that is there: what the delta refers to at <rev>
+add_base_lines() { # <rev>
+  local line insec=0 inblk=0 h op cap name new f
+  while IFS= read -r line; do
+    case "$line" in
+      "## "*) insec=0; inblk=0; [ "$(nname "${line#\#\# }")" = "spec delta" ] && insec=1 ;;
+      "### "*) inblk=0 ;;
+      Base:*) [ "$inblk" = 0 ] || continue ;;   # a stale pin anywhere in the block: replaced by the new one
+    esac
+    printf '%s\n' "$line"
+    [ "$insec" = 1 ] || continue
+    case "$line" in
+      "### MODIFIED "*|"### REMOVED "*|"### RENAMED "*)
+        h=${line#\#\#\# }; op=${h%% *}; h=${h#* }; cap=${h%%:*}; name=${h#*:}; name=$(printf '%s' "$name" | sed 's/^ *//; s/ *$//')
+        [ "$op" != RENAMED ] || name=$(printf '%s' "$name" | sed 's/ -> .*$//; s/ *$//')
+        # no early exit in the consumer: under pipefail it would kill spec_reqs and empty f
+        f=$(spec_reqs "$1" "$cap" | n="$(nname "$name")" awk -F '\t' 'BEGIN { n = ENVIRON["n"] } $2 == n && !f { print $3; f = 1 }') || f=""
+        [ -z "$f" ] || printf 'Base: %s\n' "$f"
+        inblk=1 ;;
+    esac
+  done
+}
+
+# spec:<capability>:<requirement> for every requirement the FR's delta changes —
+# the row's specs column, overlap items beside the paths; nothing without spec_dir
+spec_items() { # <row>
+  [ -n "$(cfg spec_dir "")" ] || return 0
+  printf '%s' "$1" | cut -f13 | tr ';' '\n' | awk 'NF { print "spec:" $0 }'
+}
+
+# One operation on a spec file: ADDED appends the requirement to the
+# Requirements section, MODIFIED replaces its body, REMOVED drops it, RENAMED
+# renames its heading. The new text comes from <textfile>.
+spec_apply() { # <file> <op> <name> <new> <textfile>
+  local out
+  out=$(name="$3" want="$(nname "$3")" newname="$4" awk -v op="$2" -v tf="$5" "$NN_AWK"'
+    function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+    function body(   l, blank) {
+      # the delta text: blank lines as authored, one before every scenario, none at the end
+      while ((getline l < tf) > 0) {
+        if (l ~ /^[ \t]*$/) { blank = 1; continue }
+        if (l ~ /^#### +Scenario:/ || blank) print ""
+        blank = 0; print l
+      }
+      close(tf)
+    }
+    function add() { if (!lastblank) print ""; print "### Requirement: " name; body(); done = 1; lastblank = 0 }
+    BEGIN { skip = 0; done = 0; inreq = 0; fence = 0; lastblank = 1; name = ENVIRON["name"]; want = ENVIRON["want"]; newname = ENVIRON["newname"] }
+    {
+      if ($0 ~ /^ *(```|~~~)/) fence = !fence
+      # one blank line before every heading — also after a replaced or removed block
+      if (!fence && $0 ~ /^### +Requirement:/) {
+        skip = 0
+        if (!lastblank) { print ""; lastblank = 1 }
+        if (nn(trim(substr($0, index($0, ":") + 1))) == want) {
+          done = 1
+          if (op == "MODIFIED") { print; body(); skip = 1; lastblank = 0; next }
+          if (op == "REMOVED") { skip = 1; next }
+          if (op == "RENAMED") { print "### Requirement: " newname; lastblank = 0; next }
+        }
+        inreq = 1
+      } else if (!fence && $0 ~ /^## /) {
+        if (op == "ADDED" && inreq && !done) add()
+        inreq = ($0 ~ /^## +Requirements/); skip = 0
+        if (!lastblank) { print ""; lastblank = 1 }
+      } else if (!fence && $0 ~ /^# /) { skip = 0 }
+      if (skip) next
+      print; lastblank = ($0 ~ /^[ \t]*$/)
+    }
+    END { if (op == "ADDED" && !done) add() }' "$1") || return 1
+  # one trailing newline, no blank lines at the end
+  printf '%s\n' "$out" | awk '{ L[++n] = $0 } END { while (n > 0 && L[n] ~ /^[ \t]*$/) n--; for (i = 1; i <= n; i++) print L[i] }' > "$1"
+}
+
+# Fold the delta of an FR into the spec files of this checkout — the FR's
+# worktree, after the base branch was merged: ADDED appends, MODIFIED replaces,
+# REMOVED deletes, RENAMED renames; a new capability gets a new spec file with
+# a Purpose to write. Validated against the working tree's specs first; on
+# errors nothing is written (exit 4). Prints what it did; ship commits it.
+cmd_fold() { # <ID|file> [--dry-run]
+  local what="" dry=0 text vout recs top file tmp k n op cap name new changed="" title rc=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry=1 ;;
+      -*) die "usage: fr.sh fold <ID|file> [--dry-run]" ;;
+      *) what="$1" ;;
+    esac
+    shift
+  done
+  [ -n "$what" ] || die "usage: fr.sh fold <ID|file> [--dry-run]"
+  local PROFILE="$(main_worktree)/$PROFILE"
+  spec_profile
+  text=$(delta_source "$what")
+  recs=$(printf '%s\n' "$text" | awk -v EVRE="$EVIDENCE_RE" "$DELTA_AWK")
+  # folded already? Every change is in the working tree's specs — a re-ship of a
+  # branch that carries the fold commit — then there is nothing to do
+  local applied=0 total=0 reqs fpnew
+  while IFS=$'\t' read -r k n op cap name new; do
+    [ "$k" = block ] || continue
+    total=$((total + 1))
+    reqs=$(spec_reqs - "$cap") || reqs=""
+    case "$op" in
+      ADDED|MODIFIED)
+        fpnew=$(printf '%s\n' "$recs" | n="$n" awk -F '\t' 'BEGIN { n = ENVIRON["n"] } $1 == "text" && $2 == n { sub(/^[^\t]*\t[^\t]*\t/, ""); print }' | fp)
+        if printf '%s\n' "$reqs" | n="$(nname "$name")" awk -F '\t' -v f="$fpnew" 'BEGIN { n = ENVIRON["n"] } $2 == n && $3 == f { ok = 1 } END { exit !ok }'; then applied=$((applied + 1)); fi ;;
+      REMOVED)
+        if ! printf '%s\n' "$reqs" | n="$(nname "$name")" awk -F '\t' 'BEGIN { n = ENVIRON["n"] } $2 == n { ok = 1 } END { exit !ok }'; then applied=$((applied + 1)); fi ;;
+      RENAMED)
+        if printf '%s\n' "$reqs" | awk -F '\t' -v o="$(nname "$name")" -v w="$(nname "$new")" '$2 == w { has = 1 } $2 == o { old = 1 } END { exit !(has && !old) }'; then applied=$((applied + 1)); fi ;;
+    esac
+  done <<EOF
+$recs
+EOF
+  if [ "$total" = 0 ]; then
+    printf '%s\n' "$recs" | grep -qx nodelta && die "no ## Spec delta in $what"
+    echo "nothing to fold: the delta changes no requirement (Specs: none)"; return 0
+  fi
+  if [ "$applied" = "$total" ]; then echo "already folded: every change of the delta is in the specs"; return 0; fi
+  if [ "$applied" != 0 ]; then echo "fr.sh: $applied of $total changes are folded already, the others are not — finish by hand and commit" >&2; exit 4; fi
+  if ! vout=$(validate_text "$text" "-"); then
+    printf '%s\n' "$vout"; echo "fr.sh: nothing folded — the delta does not fit the working tree's specs (the base moved: redo the delta)" >&2; exit 4
+  fi
+  printf '%s\n' "$vout" | grep '^warning' || true
+  top=$(git rev-parse --show-toplevel); tmp=$(mktemp)
+  while IFS=$'\t' read -r k n op cap name new; do
+    [ "$k" = block ] || continue
+    file="$top/$SPEC_DIR/$cap/spec.md"
+    printf '%s\n' "$recs" | n="$n" awk -F '\t' 'BEGIN { n = ENVIRON["n"] } $1 == "text" && $2 == n { sub(/^[^\t]*\t[^\t]*\t/, ""); print }' > "$tmp"
+    if [ "$dry" = 1 ]; then echo "would fold $op $cap: $name${new:+ -> $new}"; continue; fi
+    if [ ! -f "$file" ]; then
+      title=$(printf '%s' "$cap" | tr '-' ' ' | awk '{ for (i = 1; i <= NF; i++) $i = toupper(substr($i, 1, 1)) substr($i, 2) } 1')
+      mkdir -p "$(dirname "$file")"
+      printf '# %s\n\n## Purpose\n\n_Describe the capability — written when its first requirement was folded in._\n\n## Requirements\n' "$title" > "$file"
+    fi
+    spec_apply "$file" "$op" "$name" "$new" "$tmp" || { rm -f "$tmp"; die "could not fold $op $cap: $name into $file"; }
+    echo "folded $op $cap: $name${new:+ -> $new}"
+    case " $changed " in *" $cap "*) ;; *) changed="$changed $cap" ;; esac
+  done <<EOF
+$recs
+EOF
+  rm -f "$tmp"
+  [ "$dry" = 1 ] || for cap in $changed; do echo "changed: $SPEC_DIR/$cap/spec.md"; done
 }
 
 # --- autopilot ----------------------------------------------------------------
@@ -1534,6 +2022,9 @@ cmd_check() {
   if [ -n "$(cfg worktree_setup "")" ] || [ -n "$(cfg worktree_teardown "")" ]; then
     echo "hooks:    setup: $(cfg worktree_setup "—")   teardown: $(cfg worktree_teardown "—")"
   fi
+  if [ -n "$(cfg spec_dir "")" ]; then
+    echo "specs:    $(cfg spec_dir "") ($(ls -d "$(cfg spec_dir "")"/*/spec.md 2>/dev/null | wc -l | tr -d ' ') capabilities, spec deltas instead of acceptance criteria)"
+  fi
   project=$(cfg project "")
   if [ -n "$project" ]; then
     if [ -n "$(cfg project_status "")" ]; then
@@ -1575,5 +2066,8 @@ case "$cmd" in
   fix-brief) cmd_fix_brief "$@" ;;
   hook) cmd_hook "$@" ;;
   notify) cmd_notify "$@" ;;
+  validate) cmd_validate "$@" ;;
+  fingerprint) cmd_fingerprint "$@" ;;
+  fold) cmd_fold "$@" ;;
   *) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

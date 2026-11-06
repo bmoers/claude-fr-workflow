@@ -1,9 +1,24 @@
 # Changelog
 
-## [0.6.1] — 2026-11-05
+## [0.7.0] — 2026-11-06
 
 ### Added
 
+- **Spec model**, opt-in with `spec_dir`: living specs per capability in
+  OpenSpec's shape (`<spec_dir>/<capability>/spec.md`). An FR carries a flat
+  **spec delta** instead of acceptance criteria — `## Spec delta`, `Specs:`,
+  `### ADDED|MODIFIED|REMOVED|RENAMED <capability>: <requirement>`, scenarios
+  with `- Evidence: unit test | eval | check on test` — in the issue before the
+  start and in the FR doc after. `fr.sh validate` (a scenario with WHEN, THEN
+  and evidence per ADDED/MODIFIED, sources exist, ADDED is new, `Base:`
+  fingerprints still match, nothing outside the blocks), `fr.sh fingerprint`,
+  `fr.sh fold` (ADDED appends, MODIFIED replaces, REMOVED deletes, RENAMED
+  renames; a new capability gets a new file). `fr.sh spec` takes a valid delta
+  as readiness and pins the `Base:` lines; `fr.sh overlap` keeps two FRs on one
+  requirement apart. `new` writes deltas from `templates/fr-delta.md`, `ship`
+  folds after the review gate as its own commit (`blocked spec` when the base
+  moved) and checks the scenarios by their evidence, `implement` keeps
+  `## Tasks` in the FR doc. Documents with acceptance criteria keep working.
 - **`deploy_signal: deployment`:** `ship` takes the test URL from the GitHub
   Deployment of the PR's commit — the head, or the merge commit `pull_request`
   workflows build and deploy — whose environment matches `deploy_environment`
@@ -31,6 +46,9 @@
 
 ### Fixed
 
+- Text from GitHub or a spec delta — an issue title, a requirement name — reaches
+  awk through the environment, never `-v`, which processes backslash escapes: a
+  `\n` in a requirement name forged a second row in `fr.sh list`.
 - `fr.sh pipeline --wait` / `--max` and `fr.sh deployment --pr` as the last
   argument say what is missing instead of failing silently.
 - `fr.sh` without a known command prints the whole usage header again.

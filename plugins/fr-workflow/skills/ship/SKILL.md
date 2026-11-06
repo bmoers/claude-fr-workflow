@@ -47,17 +47,18 @@ this skill **stops** before step 7, write why, in the same breath as the
 evidence, with the gate as third argument — the autopilot reads it from the
 local FR log, and only `checks` and `ci` can enter its fix loop:
 
-| Event     | Gate         | When                                                    |
-| --------- | ------------ | ------------------------------------------------------- |
-| `failed`  | `review`     | code review findings under `stop`                       |
-| `failed`  | `security`   | security findings under `stop`                          |
-| `failed`  | `secret`     | a credential in the change                              |
-| `failed`  | `checks`     | the profile's local checks (step 1.7)                   |
-| `failed`  | `ci`         | red CI (step 3)                                         |
-| `failed`  | `acceptance` | a failed criterion                                      |
-| `blocked` | `lock`       | the ship lock                                           |
-| `blocked` | `deploy`     | a deployment that does not come                         |
-| `blocked` | `conflict`   | a merge conflict that needs a decision                  |
+| Event     | Gate         | When                                                           |
+| --------- | ------------ | -------------------------------------------------------------- |
+| `failed`  | `review`     | code review findings under `stop`                              |
+| `failed`  | `security`   | security findings under `stop`                                 |
+| `failed`  | `secret`     | a credential in the change                                     |
+| `failed`  | `checks`     | the profile's local checks (step 1.7)                          |
+| `failed`  | `ci`         | red CI (step 3)                                                |
+| `failed`  | `acceptance` | a failed criterion                                             |
+| `blocked` | `lock`       | the ship lock                                                  |
+| `blocked` | `deploy`     | a deployment that does not come                                |
+| `blocked` | `conflict`   | a merge conflict that needs a decision                         |
+| `blocked` | `spec`       | the spec delta no longer fits the base branch's specs          |
 | `input`   | `question`   | unclear uncommitted changes, unverified criteria, a login wall |
 
 e.g. `fr.sh project-status <issue> failed ci`. Exit 5 (not written) is a line
@@ -138,6 +139,19 @@ in the report, never a reason to stop.
    maintainers"; tell the user to record the details privately.
 7. Run the profile's *Local checks before commit*, including the security tools it
    lists. A failure stops.
+8. **Spec fold** — with `spec_dir` in the profile and a `## Spec delta` in the
+   FR doc: `fr.sh validate <ID>` checks the delta against
+   `origin/<base_branch>`; errors — a requirement another FR changed meanwhile,
+   a `Base:` that no longer matches — stop, `blocked spec`: the delta has to be
+   redone against the current spec, by the user or a new definition round. Then
+   `fr.sh fold <ID>` writes the delta into `<spec_dir>/<capability>/spec.md`;
+   commit that on its own (`docs(spec): fold <ID>` or the project's
+   convention) — the PR shows the spec change beside the code, the FR doc keeps
+   the delta as its history. A new capability's spec has a *Purpose*
+   placeholder: ask for one line, or leave it and say so in the report. On a
+   re-ship (a fix round, a resumed ship) the fold is there already: `fr.sh fold`
+   says *already folded* and nothing is committed; *nothing to fold* for
+   `Specs: none`.
 
 ## 2. Push and PR
 
@@ -149,7 +163,8 @@ in the report, never a reason to stop.
     the branch, a short summary, `Closes <issue>` for
     the FR's own issue (`issue` in the frontmatter) and `Refs <request>` for each
     of its `requests` — **never** `Closes`/`Fixes` for a request — the acceptance
-    criteria as the test plan, and *Review notes* (step 1.6) if there are any;
+    criteria, or the delta's scenarios, as the test plan, and *Review notes*
+    (step 1.6) if there are any;
   - no CI skip marker in title, body or any commit (see the hard rules).
 - Reused PR whose *Review notes* changed → `gh pr edit <N> --body-file <file>`.
 - Set `pr: <N>` in the frontmatter; it is committed in step 6.
@@ -162,7 +177,10 @@ Other FRs may have been merged meanwhile. `gh pr view <N> --json mergeable,merge
 - `CONFLICTING`, or `BEHIND` where the branch must be up to date →
   `git fetch origin && git merge origin/<base_branch>` in the worktree. **Merge,
   never rebase**, never force-push.
-- Git merges cleanly → run all reviews on the merged range and the local checks
+- Git merges cleanly → with a spec delta, `fr.sh validate <ID>` against
+  `origin/<base_branch>` again (a conflict in a spec file is a conflict like
+  any other; a `Base:` that no longer matches is `blocked spec`); then run all
+  reviews on the merged range and the local checks
   again, push, continue.
 - Real conflicts → resolve only what is unambiguous (e.g. both sides added
   different entries). Anything that needs a decision → `git merge --abort`, stop,
@@ -223,6 +241,11 @@ profile's *Deploy verification* commands, if any — read-only.
 
 - Turn every acceptance criterion into a concrete check, list them, then run them
   without asking.
+- With a spec delta the scenarios are the criteria, each checked by its
+  evidence: `unit test` → run the test that covers it and name it; `eval` → run
+  the fixture or eval it names and keep the result; `check on test` → on the
+  test environment as below. A scenario whose evidence does not exist — no such
+  test, no such fixture — fails.
 - Shared test environment with `deploy_signal: url`: `deploy_version_url` must
   report this PR's commit right **before** the first check and right **after** the
   last. Changed in between → someone else deployed; the results are void — say so
@@ -255,9 +278,10 @@ profile's *Deploy verification* commands, if any — read-only.
 Only when no criterion failed, and the user accepted any unverified ones:
 
 - Fill `## Acceptance check` in the FR doc: date, environment (URL, or "local"),
-  PR #N at `<short SHA>`; per criterion what was checked, how, and the result —
+  PR #N at `<short SHA>`; per criterion — or per scenario — what was checked, how, and the result —
   `passed` or `unverified, accepted by <user>`; the limits of the check.
 - Tick only the criteria actually verified (`- [x]`); unverified ones stay open.
+  Scenarios have no boxes: their result is the line in the acceptance check.
 - `status: in-review`.
 - Commit (`docs(fr): acceptance check <ID>` or the project's convention) and push.
   This runs CI again — wanted: the commit that gets merged must carry green

@@ -19,7 +19,10 @@ Read `${CLAUDE_PLUGIN_ROOT}/reference/model.md` and `.claude/workflow.md`.
   `claude -w <worktree name>` — the name `start` printed; this skill changes
   nothing anywhere else.
 - Read the FR doc (`path` from `fr.sh list`). It is the whole brief: spec,
-  acceptance criteria, technical notes, failure behaviour. The issue is history.
+  acceptance criteria — or the spec delta, whose scenarios are the acceptance
+  check, each with the evidence to produce: a unit test to write, an eval
+  fixture, nothing beyond the code for `check on test` — technical notes,
+  failure behaviour. The issue is history.
 - `status` must be `in-progress`. `in-review` → the FR shipped already; only
   changes the user asks for after a review belong here — say so and wait.
 - Uncommitted changes in the worktree come from an earlier session of this FR:
@@ -30,10 +33,14 @@ Read `${CLAUDE_PLUGIN_ROOT}/reference/model.md` and `.claude/workflow.md`.
 With `fix` (the autopilot's fix loop starts it that way) → section **1a**
 instead.
 
+- **Tasks:** `## Tasks` in the FR doc — one `- [ ]` per step, from the spec
+  delta's requirements and scenarios or from the acceptance criteria, written
+  before the first code commit when the doc has none yet; tick them as they
+  land, in the same commits. A resumed session goes on at the first open task.
 - Follow the FR doc. What it leaves open and the code decides: decide, and
   write it into the doc — decisions and deviations go into the FR doc, in the
-  same commits as the code. Acceptance criteria change only when the user
-  agrees.
+  same commits as the code. Acceptance criteria and the spec delta change only
+  when the user agrees.
 - The profile's conventions, *Hard rules* and *Local checks before commit*
   apply; run the checks before every commit.
 - Commit locally, per the project's convention, with the FR id in the subject.
@@ -73,7 +80,7 @@ stopped at a gate the project put into its fix loop (`fix_loop`).
 session on this event; exit 5 (board not written) is a note, not a stop.
 
 Stop with a short summary: what was done, what is open, which acceptance
-criteria deserve a look. Then the ship session — a fresh session of this
+criteria or scenarios deserve a look. Then the ship session — a fresh session of this
 worktree with the profile's `ship_model` / `ship_effort` (default `opus` /
 `high`), opened from the main checkout:
 

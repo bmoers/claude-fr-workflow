@@ -211,6 +211,17 @@ closing the FR issue as *not planned*, and cleans up locally. The branch stays o
 GitHub as the record. A request whose FRs were all dropped is not closed as done:
 Claude proposes defining it again or closing it as "not planned" — your call.
 
+## Specs that grow with the FRs
+
+Optional: with `spec_dir` in the profile, an FR's acceptance section is a **spec
+delta** — which requirements it adds, changes, removes or renames in the
+project's living specs (`<spec_dir>/<capability>/spec.md`), each with its
+scenarios and the evidence that proves them: a unit test, an eval, a check on
+the test environment. `new` writes it, `start` checks it against the current
+specs and pins what it refers to, `ship` folds it into the spec files before the
+first push and runs the scenarios as the acceptance check. Two FRs on the same
+requirement never run in parallel. Details: [the profile](profile.md#spec-model).
+
 ## Any time: `/fr-workflow:status`
 
 An overview of all FRs — defined but not started, in progress on their branch, in

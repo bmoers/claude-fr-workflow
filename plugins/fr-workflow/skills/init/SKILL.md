@@ -69,6 +69,9 @@ Also propose:
   project's own commands, idempotent and non-interactive, with `FR_ID`,
   `FR_NUMBER`, `FR_BRANCH` and `FR_WORKTREE` to derive names and ports from.
   Otherwise leave both empty. Ask which files they generate, for `.gitignore`.
+- `spec_dir`: a folder of living specs, one `<capability>/spec.md`, when the
+  project wants its FRs as spec deltas (*Spec model* in the model) — empty
+  otherwise. Nothing has to exist upfront: the first FRs ADD their requirements.
 - `shared_paths`: what every change tends to touch — lockfiles, a migrations
   folder, translation files, a central route or DI registry. Look at which files
   appear in many recent merged PRs (`git log --name-only` on the base branch).
@@ -108,6 +111,8 @@ point to the `CLAUDE.md` sections instead of copying them.
 ## 3. Write — after the user confirmed
 
 - `.claude/workflow.md` — the profile.
+- `<spec_dir>/`, with `spec_dir`: the folder, empty — `ship` creates
+  `<capability>/spec.md` at the first fold.
 - `<fr_dir>/README.md` from `${CLAUDE_PLUGIN_ROOT}/templates/fr-readme.md`. If a
   README exists there, propose a short section instead.
 - `.gitignore`: make sure `.claude/worktrees/` and `.playwright-mcp/` are listed,

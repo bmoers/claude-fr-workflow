@@ -27,6 +27,7 @@ size_models: "S=sonnet/low, M=sonnet/medium, L=opus/high, XL=opus/xhigh"   # iss
 ship_model: opus                  # model of the ship session: reviews, gates, acceptance check
 ship_effort: high                 # low | medium | high | xhigh | max
 shared_paths: []                  # paths every FR may touch, e.g. [package-lock.json, db/migrations]
+spec_dir:                         # folder of the living specs, one <capability>/spec.md; the FRs then carry spec deltas instead of acceptance criteria. Empty = off
 worktree_setup:                   # command run in every FR worktree after start created or resumed it, e.g. scripts/stack.sh up — idempotent, non-interactive; empty = nothing
 worktree_teardown:                # command run before done removes the worktree, e.g. scripts/stack.sh down; empty = nothing
 autopilot_model: sonnet           # model of the autopilot session — it drives, it does not judge

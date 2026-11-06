@@ -49,6 +49,7 @@ tokens.
 | `shared_paths`            | `[]`                                                          | paths many FRs touch, e.g. `[package-lock.json, db/migrations]`. Two FRs that both change something under one of them never run in parallel                                                                                                                                                                                                                                                                                                                                                                         |
 | `worktree_setup`          | —                                                             | command `start` runs in an FR worktree it created or resumed — a dev stack per worktree, dependencies, an `.env`. Idempotent, non-interactive; `FR_ID`, `FR_NUMBER`, `FR_BRANCH`, `FR_WORKTREE` in its environment. Empty = nothing. See [worktree hooks](#worktree-hooks)                                                                                                                                                                                                                                          |
 | `worktree_teardown`       | —                                                             | command `done` runs before anything removes the worktree, e.g. the stack's `down`. Empty = nothing                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `spec_dir`                | —                                                             | folder of the living specs, one `<capability>/spec.md` — the FRs then carry **spec deltas** instead of acceptance criteria, folded by `ship` ([below](#spec-model), and *Spec model* in the model). Empty = off                                                                                                                                                                                                                                                                                                     |
 | `autopilot_model`         | `sonnet`                                                      | model of the autopilot session. It starts sessions and reads results; the judgement stays with the ship session                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `autopilot_effort`        | `medium`                                                      | effort of the autopilot session                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `autopilot_sessions`      | `3`                                                           | FR sessions (implementation, fix, ship) the autopilot runs at a time; further starts wait                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -191,6 +192,25 @@ The contract, on both sides:
 - Worktrees live inside the repository. `.claude/` belongs in `.dockerignore` —
   a `COPY . .` would copy every worktree into the image — and in the ignore list
   of file watchers that watch the whole repository.
+
+## Spec model
+
+With `spec_dir` set, every FR describes its change as a **delta** to the living
+specs — in the issue before the start, in the FR doc after — and `ship` folds it
+into `<spec_dir>/<capability>/spec.md` before the first push, as its own commit.
+The delta's scenarios are the acceptance check: each names its evidence, `unit
+test`, `eval` or `check on test`. The shape, the checks of `fr.sh validate` and
+the fold are in the model (*Spec model*); the template is
+`templates/fr-delta.md`.
+
+| `spec_dir` | Pick it when                                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------------- |
+| empty      | acceptance criteria as before — nothing changes                                                                     |
+| `specs`    | the project wants a spec that grows with every FR; the folder may start empty, the first FRs ADD their requirements |
+
+Two FRs that change the same requirement never run in parallel. A requirement
+another FR changed since an FR was defined stops that FR's start and ship
+(`Base:` fingerprint) until its delta is redone against the current spec.
 
 ## Two copies of the profile
 
