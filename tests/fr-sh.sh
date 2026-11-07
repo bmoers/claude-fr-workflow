@@ -1278,9 +1278,16 @@ git worktree lock --reason "claude session (pid $(cat "$STUB/session91.pid"))" .
 "$FR" finish FR-91 > "$SP/f.out" 2>&1; rc=$?
 check "finish: a live session that is not the autopilot's holds the worktree → exit 3" '[ "$rc" = 3 ] && grep -q "a session still holds" "$SP/f.out" && [ -d .claude/worktrees/fr-91-x ]' "exit $rc: $(cat "$SP/f.out")"
 kill "$(cat "$STUB/session91.pid")" 2>/dev/null; git worktree unlock .claude/worktrees/fr-91-x
-: > "$STUB_LOG"
+# the ship session the autopilot launched lingers idle in the worktree, and the
+# lock names the launcher's pid, which is gone (claude --bg in a container):
+# the session is ended, the stale lock lifted, the worktree removed
+git worktree lock --reason "claude session fr-91-x (pid 2147483647 start 1)" .claude/worktrees/fr-91-x
+echo "$(date +%s) launch ship ses91ship" >> "$(git rev-parse --git-common-dir)/fr-workflow/FR-91.log"
+stub agents "$(agents ses91ship idle 4242)"
+: > "$STUB_LOG"; : > "$CLAUDE_LOG"
 "$FR" finish FR-91 > "$SP/f.out" 2>&1; rc=$?
-check "finish: worktree removed, local branch deleted, board done, out of the queue" '[ "$rc" = 0 ] && [ ! -d .claude/worktrees/fr-91-x ] && ! git show-ref --verify --quiet refs/heads/feat/fr-91-x && grep -q -- "--field Phase --value Done" "$STUB_LOG" && ! "$FR" queue list | grep -q FR-91 && grep -q " event done$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-91.log" && grep -q "^finished FR-91" "$SP/f.out"' "exit $rc: $(cat "$SP/f.out" "$STUB_LOG")"
+check "finish: own idle session ended, stale lock lifted, worktree removed, local branch deleted, board done, out of the queue" '[ "$rc" = 0 ] && grep -q "^stop ses91ship" "$CLAUDE_LOG" && [ ! -d .claude/worktrees/fr-91-x ] && ! git show-ref --verify --quiet refs/heads/feat/fr-91-x && grep -q -- "--field Phase --value Done" "$STUB_LOG" && ! "$FR" queue list | grep -q FR-91 && grep -q " event done$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-91.log" && grep -q "^finished FR-91" "$SP/f.out"' "exit $rc: $(cat "$SP/f.out" "$STUB_LOG" "$CLAUDE_LOG")"
+nostub agents
 "$FR" finish FR-90 > "$SP/f.out" 2>&1; rc=$?
 check "finish: an FR that is not merged → exit 4" '[ "$rc" = 4 ] && grep -q "is in-review, not merged" "$SP/f.out"' "exit $rc: $(cat "$SP/f.out")"
 # finish after a squash merge with GitHub's delete-branch-on-merge: git's -d

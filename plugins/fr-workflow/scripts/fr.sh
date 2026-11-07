@@ -2261,7 +2261,7 @@ at_merged_pr_head() { # <pr> <branch>
 
 cmd_finish() {
   [ $# -eq 1 ] || die "usage: fr.sh finish <ID>"
-  local id row status docpr ref wt path reason lpid spid st rc out i el ev eg ll lk ls nf ap
+  local id row status docpr ref wt path reason st rc out i el ev eg ll lk ls nf ap
   id=$(fr_id "$1")
   row=$(rows | awk -F '\t' -v id="$id" '$1 == id')
   [ -n "$row" ] || die "no such FR: $id"
@@ -2278,19 +2278,23 @@ cmd_finish() {
   wt=$(wt_of "$ref")
   if [ -n "$wt" ]; then
     path=$(printf '%s' "$wt" | cut -f1); reason=$(printf '%s' "$wt" | cut -f2)
+    # The session the autopilot launched for this FR, lingering idle once the
+    # FR is merged, is ended — its work is done; anyone else's session is not.
+    # The lock may name a pid that is not the session's: `claude --bg` writes
+    # it from the launcher, which has exited by now in a container.
+    read_facts "$id"; load_agents; st=unknown
+    if [ "$ls" != "-" ]; then st=$(session_state "$ls"); fi
+    if [ "$st" = idle ]; then
+      "$CLAUDE_BIN" stop "$ls" >/dev/null 2>&1 || true
+      i=0; while held "$(wt_of "$ref" | cut -f2)"; do i=$((i + 1)); [ "$i" -le 30 ] || break; sleep 1; done
+    fi
+    reason=$(wt_of "$ref" | cut -f2)
     if held "$reason"; then
-      # the autopilot's own session lingering idle with its lock is ended; anyone else's is not
-      read_facts "$id"; load_agents; spid=""; st=unknown
-      if [ "$ls" != "-" ]; then spid=$(session_pid "$ls"); st=$(session_state "$ls"); fi
-      lpid=$(lock_pid "$reason")
-      if [ -n "$lpid" ] && [ "$lpid" = "$spid" ] && [ "$st" = idle ]; then
-        "$CLAUDE_BIN" stop "$ls" >/dev/null 2>&1 || true
-        i=0; while held "$(wt_of "$ref" | cut -f2)"; do i=$((i + 1)); [ "$i" -le 30 ] || break; sleep 1; done
-      fi
-      if held "$(wt_of "$ref" | cut -f2)"; then
-        log_line "$id" "finish a session still holds the worktree ($reason)"
-        echo "fr.sh: $id not finished — a session still holds $path ($reason): end it, or /fr-workflow:done $id" >&2; exit 3
-      fi
+      log_line "$id" "finish a session still holds the worktree ($reason)"
+      echo "fr.sh: $id not finished — a session still holds $path ($reason): end it, or /fr-workflow:done $id" >&2; exit 3
+    elif [ -n "$reason" ]; then
+      # a lock whose process is gone is stale: lifted, like :done does by hand
+      git worktree unlock "$path" 2>/dev/null || true
     fi
     rc=0; out=$( (cmd_hook teardown "$id" "$path") 2>&1 ) || rc=$?
     printf '%s\n' "$out"

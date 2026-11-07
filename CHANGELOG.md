@@ -38,8 +38,9 @@ session may hand the merge to GitHub, and the autopilot cleans up after it.
   nothing changes.
 - **`fr.sh finish <ID>` and `autopilot_finish`:** after the merge the
   autopilot's action is `finish` — the worktree hook, the worktree (never on
-  uncommitted changes; the autopilot's own idle session is ended first,
-  anyone else's stops it), the local branch (`-d`; after a squash merge with
+  uncommitted changes; the session the autopilot launched for the FR,
+  idle once the FR is merged, is ended first, a lock whose process is gone
+  is lifted, anyone else's live session stops it), the local branch (`-d`; after a squash merge with
   *Delete branch on merge* git refuses, so `-D` when the branch tip is the
   merged PR's head — nothing is lost then), the board's `done`, out of the
   queue. A finish that fails is logged and reported once. Issues and requests
