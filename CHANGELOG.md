@@ -75,6 +75,9 @@ session may hand the merge to GitHub, and the autopilot cleans up after it.
   findings that object to what the FR requires or excludes go into the review
   notes instead of stopping. From the first FR through the container: the ask
   sat in a session for an hour that nobody saw.
+- `review_effort` (default `high`): the effort of `/code-review` in the ship
+  session's review gate — `high` finds many small things, and under
+  `review_gate: stop` each is a round for the person; `medium` for small FRs.
 - The PR facts carry whether auto-merge is enabled (`autoMergeRequest`).
 
 ### Changed

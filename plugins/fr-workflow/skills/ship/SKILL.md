@@ -106,7 +106,8 @@ nothing changes: the ask is your report, the answer comes at the prompt.
 1. Commit everything that belongs to the FR **locally** (project convention), so
    new files are part of the reviewed range. Do not push.
 2. Run the reviews on the FR's range:
-   - `/code-review high origin/<base_branch>...HEAD` — a revision range is a
+   - `/code-review <review_effort> origin/<base_branch>...HEAD` (the profile's
+     `review_effort`, default `high`) — a revision range is a
      documented target; without one it would review only what is ahead of the
      branch's upstream, which can be nothing. It runs in the background as its
      own agent, so start it first;

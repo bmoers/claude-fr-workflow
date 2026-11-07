@@ -10,6 +10,7 @@ project_phase_field:              # the project's phase column (Backlog, Plannin
 project_status:                   # plugin events -> its values, e.g. "defined=Ready, running=In progress, approval=In review, done=Done" or "defined=Building/Ready, …"; empty = GitHub's workflows move the cards
 notify_issues: ask                # never | ask | always — "ready for acceptance" comment
 review_gate: stop                 # stop | report — what :ship does on code review findings
+review_effort: high               # low | medium | high | xhigh | max — effort of /code-review in the review gate; medium for small FRs
 security_gate: stop               # stop | report — what :ship does on security review findings
 review_agents: [silent-failure-hunter]   # :ship's extra reviewers, also type-design-analyzer; [] = none
 deploy_signal: none               # none | pr-checks | pr-comment | url | deployment
