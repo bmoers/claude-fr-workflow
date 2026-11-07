@@ -355,7 +355,10 @@ docker run --rm -v fr-autopilot-test:/home/pwuser --env-file … \
 
 Use a separate volume for this: a registered marketplace stays registered.
 With a folder marketplace the skills run from the mounted folder itself
-(`${CLAUDE_PLUGIN_ROOT}` points there), so keep the mount on every start.
+(`${CLAUDE_PLUGIN_ROOT}` points there), and so does the entrypoint's
+keep-alive — the cache copy Claude Code makes at registration is not
+refreshed by `claude plugin marketplace update` for a folder. Keep the mount
+on every start.
 
 ### Several containers, one repository
 

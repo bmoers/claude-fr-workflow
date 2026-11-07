@@ -135,9 +135,12 @@ fi
 claude auth status 2>/dev/null | jq -e '.loggedIn == true' >/dev/null || { echo "fr-autopilot: CLAUDE_CODE_OAUTH_TOKEN is not accepted (claude auth status: not logged in)" >&2; exit 3; }
 say "Claude Code $(claude --version 2>/dev/null | head -n 1)"
 
-# fr.sh of the installed plugin — the newest copy in the cache, the one the
-# sessions run (cache/<marketplace>/fr-workflow/<version>/scripts/fr.sh)
-fr=$(find "$HOME/.claude/plugins/cache" -type f -path '*/fr-workflow/*/scripts/fr.sh' 2>/dev/null | sort -V | tail -n 1 || true)
+# fr.sh of the installed plugin, the same copy the sessions run: a mounted
+# marketplace folder is used as it is (its skills run from there too), else
+# the newest copy in the cache (cache/<marketplace>/fr-workflow/<version>/)
+fr=""
+if [ -n "${MARKETPLACE:-}" ] && [ -f "$MARKETPLACE/plugins/fr-workflow/scripts/fr.sh" ]; then fr="$MARKETPLACE/plugins/fr-workflow/scripts/fr.sh"; fi
+[ -n "$fr" ] || fr=$(find "$HOME/.claude/plugins/cache" -type f -path '*/fr-workflow/*/scripts/fr.sh' 2>/dev/null | sort -V | tail -n 1 || true)
 [ -n "$fr" ] || fr=$(find "$HOME/.claude/plugins/marketplaces" -type f -path '*/fr-workflow/scripts/fr.sh' 2>/dev/null | head -n 1 || true)
 [ -n "$fr" ] || { echo "fr-autopilot: fr-workflow is not installed — no fr.sh under $HOME/.claude/plugins" >&2; exit 3; }
 say "plugin: $fr"
