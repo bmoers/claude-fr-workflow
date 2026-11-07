@@ -1687,10 +1687,19 @@ held() { # <lock reason>
 AGENTS_JSON=""
 load_agents() { AGENTS_JSON=$("$CLAUDE_BIN" agents --json 2>/dev/null) || AGENTS_JSON=""; }
 session_state() { # <session id, or the prefix claude --bg printed>
+  local out st pid
   [ -n "$AGENTS_JSON" ] && [ -n "$1" ] || { echo unknown; return 0; }
-  printf '%s' "$AGENTS_JSON" | jq -r --arg s "$1" '
+  out=$(printf '%s' "$AGENTS_JSON" | jq -r --arg s "$1" '
     [.[] | select((.sessionId // "") | startswith($s))]
-    | if length == 0 then "gone" else (.[0].status // "unknown") end' 2>/dev/null || echo unknown
+    | if length == 0 then "gone\t" else "\(.[0].status // "unknown")\t\(.[0].pid // "")" end' 2>/dev/null) || { echo unknown; return 0; }
+  st=${out%%	*}; pid=${out#*	}
+  # a record without a status is a session the daemon lost track of — after a
+  # container restart it lists the old container's sessions this way — unless
+  # its process is still there
+  if [ "$st" = unknown ]; then
+    if [ -z "$pid" ] || ! ps -p "$pid" >/dev/null 2>&1; then st=gone; fi
+  fi
+  echo "$st"
 }
 session_pid() { # <session id, or its prefix> → the pid claude agents lists, or nothing
   [ -n "$AGENTS_JSON" ] && [ -n "$1" ] || return 0

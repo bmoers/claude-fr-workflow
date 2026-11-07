@@ -652,6 +652,14 @@ stub agents-fails ""; : > "$CLAUDE_LOG"
 "$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
 check "launch autopilot: claude agents gives no answer → exit 1, no second autopilot" '[ "$rc" = 1 ] && grep -q "cannot tell whether the autopilot $SIDAP" "$SP/l.out" && [ ! -s "$CLAUDE_LOG" ] && [ -f "$SEEN" ]' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
 nostub agents-fails
+# a record without status and pid — the old container's session after a restart — is gone: a new one starts
+stub agents "[{\"sessionId\":\"$SIDAP-0000-full\",\"state\":\"blocked\"}]"; : > "$CLAUDE_LOG"
+"$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
+check "launch autopilot: the recorded one is listed without status and pid → gone, a new one starts" '[ "$rc" = 0 ] && grep -q -- "--bg -n fr-autopilot" "$CLAUDE_LOG" && grep -q "^launched autopilot as" "$SP/l.out"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
+SIDAP=$("$FR" queue session); printf 'seen\n' > "$SEEN"
+stub agents "[{\"sessionId\":\"$SIDAP-0000-full\",\"status\":null,\"pid\":$$}]"; : > "$CLAUDE_LOG"
+"$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?
+check "launch autopilot: no status but a live pid → cannot tell, exit 1" '[ "$rc" = 1 ] && grep -q "cannot tell whether the autopilot $SIDAP" "$SP/l.out" && [ ! -s "$CLAUDE_LOG" ]' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
 printf -- '---\nsession_permission_mode: "auto --dangerously-skip-permissions"\n---\n' > .claude/workflow.md
 stub agents "$(agents "$SIDAP" idle)"; : > "$CLAUDE_LOG"
 "$FR" launch autopilot > "$SP/l.out" 2>&1; rc=$?

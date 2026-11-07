@@ -87,6 +87,10 @@ session may hand the merge to GitHub, and the autopilot cleans up after it.
   without a value for it write nothing there — map it like `running`.
 - `init` proposes `project_phase_field` and `Phase/Status` values for a board
   with a phase column, and `.claude/workflow.local.md` for `.gitignore`.
+- A session that `claude agents --json` lists without a status and without a
+  live pid counts as gone — after a container restart the daemon still lists
+  the old container's sessions this way, and `launch autopilot` refused to
+  start a new one ("cannot tell") on every keep-alive tick.
 - The autopilot skill says in so many words that a board queue never ends the
   loop: an empty queue is a wait, not an end — a sandbox run showed a session
   ending there, and every relaunch costs a session start.
