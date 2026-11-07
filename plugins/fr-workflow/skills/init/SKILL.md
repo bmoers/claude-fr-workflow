@@ -106,6 +106,10 @@ Also propose:
   agreed (existing options keep their id, colour and text). Needs `gh` 2.97 or
   newer wherever the commands run. Without the key GitHub's own workflows move
   the cards.
+  Tell the user to switch the project's *Auto-close issue* workflow off: it
+  closes the issue when Status reaches its chosen value, and with phases a
+  value like *Complete* is reached at `implemented`, mid-flight. The PR's
+  `Closes` closes the issue on merge.
 
 Show the proposed profile and all open questions in one message. Typical ones:
 test environment URL and how to get in, test accounts (names or roles, never

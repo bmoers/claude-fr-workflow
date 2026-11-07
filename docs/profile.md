@@ -169,6 +169,15 @@ owner of the issue repository — the organisation or user — like
 `gh issue create --project`. Keep GitHub's *Item closed* workflow on as the
 safety net for issues closed by hand.
 
+**GitHub's *Auto-close issue* workflow.** Projects ship a workflow that
+closes an issue when its Status reaches one chosen value, usually the "done"
+one. With phases, a value like *Complete* is reached long before the end —
+`implemented` maps to *Building / Complete* — and the workflow closes the FR
+issue while the FR is still being shipped (seen twice in the sandbox: closed
+seven seconds after `implemented`). Switch *Auto-close issue* off in the
+project's workflows: the PR's `Closes` closes the issue on merge, and `done`
+writes the final column. Or map `implemented` to nothing.
+
 ## Autopilot queue from the board
 
 `autopilot_queue: project` makes the board the autopilot's inbox. At every

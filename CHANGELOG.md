@@ -86,7 +86,10 @@ session may hand the merge to GitHub, and the autopilot cleans up after it.
 - `ship` writes `shipping` at its start where it wrote `running`; profiles
   without a value for it write nothing there — map it like `running`.
 - `init` proposes `project_phase_field` and `Phase/Status` values for a board
-  with a phase column, and `.claude/workflow.local.md` for `.gitignore`.
+  with a phase column, and `.claude/workflow.local.md` for `.gitignore`, and
+  says to switch the project's *Auto-close issue* workflow off: with phases,
+  *Complete* is reached at `implemented`, and the workflow closed the FR issue
+  mid-flight in the sandbox.
 - A session that `claude agents --json` lists without a status and without a
   live pid counts as gone — after a container restart the daemon still lists
   the old container's sessions this way, and `launch autopilot` refused to
