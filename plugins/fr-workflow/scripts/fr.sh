@@ -1137,6 +1137,15 @@ cmd_stop_comment() { # <ID> <gate> <body file>
 # `;` or `and` — `fix 1; accept 2,3`. A line with any clause that is not a
 # command is no decision. Exit 4 when there is none — with --wait it looks
 # again every <s> seconds until one comes or --max <s> passed.
+# the decision's clauses are the log's last decision lines already
+decision_logged() { # <ID> <clauses>
+  local f want have
+  f="$(state_dir)/$1.log"; [ -f "$f" ] || return 1
+  want=$(printf '%s\n' "$2" | awk -F '\t' 'NF { print "decision " $1 " " $2 " by " $3 }')
+  have=$(awk '{ $1 = ""; sub(/^ /, ""); print }' "$f" | awk -v n="$(printf '%s\n' "$want" | grep -c '')" '{ l[NR] = $0 } END { for (i = NR - n + 1; i <= NR; i++) if (i > 0) print l[i] }')
+  [ "$want" = "$have" ]
+}
+
 cmd_decision() { # <ID> [--wait <s> [--max <s>]]
   [ $# -ge 1 ] || die "usage: fr.sh decision <ID> [--wait <s> [--max <s>]]"
   local id ref n repo wait="" max=0 since t0 found verb items login line
@@ -1178,7 +1187,10 @@ cmd_decision() { # <ID> [--wait <s> [--max <s>]]
         }
         END { printf "%s", last }')
     if [ -n "$found" ]; then
-      printf '%s\n' "$found" | while IFS=$'\t' read -r verb items login; do log_line "$id" "decision $verb $items by $login"; done
+      # logged once: a second call that finds the same decision adds nothing
+      if ! decision_logged "$id" "$found"; then
+        printf '%s\n' "$found" | while IFS=$'\t' read -r verb items login; do log_line "$id" "decision $verb $items by $login"; done
+      fi
       printf '%s\n' "$found"; return 0
     fi
     [ -n "$wait" ] || { echo "fr.sh: no decision on $repo#$n yet" >&2; exit 4; }

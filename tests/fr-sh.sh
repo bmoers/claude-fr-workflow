@@ -827,6 +827,8 @@ now=$(date -u +%s)
 stub comments "$(printf 'comment\t%s\tOWNER\tboris\taccept all\ncomment\t%s\tNONE\tstranger\tabort\ncomment\t%s\tOWNER\tboris\tAccept 1, 3' "$((now - 500))" "$((now + 5))" "$((now + 10))")"
 "$FR" decision FR-90 > "$SP/d.out" 2>&1; rc=$?
 check "decision: the newest trusted command after the stop comment, items normalised; older and untrusted ones ignored" '[ "$rc" = 0 ] && [ "$(cat "$SP/d.out")" = "$(printf "accept\t1,3\tboris")" ] && grep -q " decision accept 1,3 by boris$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-90.log"' "exit $rc: $(cat "$SP/d.out")"
+"$FR" decision FR-90 >/dev/null 2>&1
+check "decision: a second call finding the same decision logs it only once" '[ "$(grep -c " decision accept 1,3 by boris$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-90.log")" = 1 ]' "$(tail -n 3 "$(git rev-parse --git-common-dir)/fr-workflow/FR-90.log")"
 stub comments "$(printf 'comment\t%s\tOWNER\tboris\t/fr abort' "$((now + 20))")"
 check "decision: abort, with a /fr prefix" '[ "$("$FR" decision FR-90 2>/dev/null)" = "$(printf "abort\t-\tboris")" ]' "$("$FR" decision FR-90 2>&1)"
 stub comments "$(printf 'comment\t%s\tOWNER\tboris\tFix 1; accept 2, 4 and abort' "$((now + 20))")"
