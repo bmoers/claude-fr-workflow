@@ -225,18 +225,26 @@ GitHub's project workflows know *added* and *closed*; *running*, *waiting* and
 *failed* only the session knows. `project_status` in the profile maps the
 plugin's events to the board's own values (`defined=Ready, running=In progress,
 …`; the column is `project_status_field`, default `Status`); an event without a
-value writes nothing. `fr.sh project-status <issue> <event>`:
+value writes nothing. A board with a second single-select column for the
+**phase** — Backlog, Planning, Building, Review, Done — names it in
+`project_phase_field`, and a value `Phase/Status` writes both
+(`defined=Building/Ready`); a value without a phase leaves the phase as it is,
+which is what `input`, `failed` and `blocked` want. `fr.sh project-status
+<issue> <event>`:
 
 | Event         | Written by                      | When                                                                                                                                                             |
 | ------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `defined`     | `:new`                          | the FR issue is written and ready — no open questions                                                                                                            |
+| `planning`    | `:new`                          | `new` works an issue out — written before `defined` or `input`, so a board with phases shows it in planning                                                      |
+| `defined`     | `:new`                          | the FR issue is written and ready — no open questions; with phases the hand-off to building                                                                      |
 | `input`       | `:new`, `:implement`, `:ship`   | a skill stops with a question: open questions left on purpose, a decision only the user can take, unclear uncommitted changes, unverified criteria, a login wall |
 | `running`     | `:start`, `:implement`, `:ship` | branch, worktree and session exist; a resumed FR; `:implement` goes on after an answer; `:ship` starts                                                           |
 | `implemented` | `:implement`                    | the implementation session handed over — the autopilot starts the ship session on it                                                                             |
+| `review`      | `fr.sh launch ship`             | the hand-off to the ship session — with phases the review phase, status ready                                                                                    |
+| `shipping`    | `:ship`                         | the ship session started: review gate, PR, CI, deployment, acceptance check                                                                                      |
 | `failed`      | `:ship`                         | a gate found a defect in the change: review or security findings under `stop`, a secret, red CI, a failed criterion                                              |
 | `blocked`     | `:start`, `:ship`, `:done`      | something outside the change holds it up: a worktree hook that failed, the ship lock, a deployment that does not come, a merge conflict that needs a decision    |
-| `approval`    | `:ship`                         | finished: PR open, acceptance check recorded — the merge is the user's                                                                                           |
-| `done`        | `:done`                         | merged or dropped                                                                                                                                                |
+| `approval`    | `:ship`                         | finished: PR open, acceptance check recorded — the merge is the user's, or GitHub's after `fr.sh merge`                                                          |
+| `done`        | `:done`, `fr.sh finish`         | merged and cleaned up, or dropped                                                                                                                                |
 
 `:ship`, `:implement`, `:start` and `:done` pass the gate that stopped them as
 third argument — `:start` and `:done` `blocked setup` / `blocked teardown` for
@@ -297,11 +305,34 @@ in the user's session with `--here`.
   `pipeline`, `launch`, `fix-brief`, `deployment` and `pr-commit` read the
   main checkout's. A change on the base branch reaches an FR's sessions once
   its branch has it: merge the base branch into the FR branch, or change the
-  profile before the FR starts.
+  profile before the FR starts. Beside the profile, `.claude/workflow.local.md`
+  (ignored by git) may set the per-machine keys `autopilot_assignee`,
+  `notify_command`, `session_permission_mode`, `autopilot_model` and
+  `autopilot_effort`; nothing else is read from it.
 - **At most `autopilot_sessions`** FR sessions at a time (default 3); further
   starts wait.
-- **The merge stays the user's.** So do the answers to a session's questions,
-  and every FR the pipeline reports.
+- **The queue from the board** (`autopilot_queue: project`): every `pipeline`
+  call runs `fr.sh queue sync` first — the open FR issues of the issue
+  repository on the square `project_status` maps `defined` to (*Building /
+  Ready* on a board with phases), whose assignees fit `autopilot_assignee`: a
+  login takes the FRs assigned to that person, `none` the unassigned ones,
+  empty any. Several autopilots on one repository — one per developer, one
+  shared — divide the work by assignment; what one started is on `origin` and
+  counts in everyone's waves. The board unreadable is a line on stderr, never
+  a stop. Without the key the queue is what `queue add` holds.
+- **After the merge** (`autopilot_finish: on`): the pipeline's action for a
+  merged FR is `finish` — `fr.sh finish` runs the worktree hook, removes the
+  worktree (never on uncommitted changes) and the local branch (`-d`; `-D`
+  only when its tip is the head of the merged PR, so nothing is lost),
+  writes `done` to the board and takes the FR out of the queue. Issues and
+  requests stay with `:done`. A finish that fails is logged and reported
+  once, not retried. Default off: merged FRs need nothing.
+- **The merge is the user's, or GitHub's.** With `auto_merge: auto` the ship
+  session runs `fr.sh merge` after the acceptance check: a deterministic
+  merge gate, then `gh pr merge --auto` — the base branch's rules decide when,
+  the pipeline shows the PR as `merging`. Never the autopilot, never by hand,
+  never `--admin`. The answers to a session's questions stay the user's, and
+  every FR the pipeline reports.
 
 ### Fix loop
 
@@ -449,7 +480,11 @@ refs are compared case-insensitively. Two FR branches with the same id make
 
 The profile and the project's `CLAUDE.md` may add rules; they never relax these.
 
-- **Never merge** a PR. The merge is the user's decision.
+- **Never merge a PR by own judgement.** The merge is the user's decision —
+  or, with `auto_merge: auto` in the profile, GitHub's: the ship session asks
+  through `fr.sh merge` after `fr.sh merge-gate` passed, with `gh pr merge
+  --auto`, never `--admin`, never a bypass; the base branch's rules decide.
+  No other command merges, approves or closes a PR.
 - **Never trigger** deploy or release workflows (`gh workflow run`, re-running
   deploy jobs). If a deployment does not come, report it.
 - **Never touch production** — no reads, no writes — unless the user explicitly

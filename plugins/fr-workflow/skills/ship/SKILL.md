@@ -42,7 +42,7 @@ workflow knows the slot is in use and leaves it alone. Removed **before stopping
 at any gate** as well, like the lock.
 
 **Board status** (`project_status` in the profile; `<issue>` is the FR doc's
-`issue`): `fr.sh project-status <issue> running` once step 0 passed. Whenever
+`issue`): `fr.sh project-status <issue> shipping` once step 0 passed. Whenever
 this skill **stops** before step 7, write why, in the same breath as the
 evidence, with the gate as third argument — the autopilot reads it from the
 local FR log, and only `checks` and `ci` can enter its fix loop:
@@ -291,6 +291,21 @@ Only when no criterion failed, and the user accepted any unverified ones:
   (e.g. `paths-ignore` skips FR-doc-only pushes), go on. Then
   `fr.sh lock release <ID>`.
 
+## 6b. Merge — GitHub's, when the profile says so
+
+- `auto_merge: auto` → `fr.sh merge <ID>`. It runs `fr.sh merge-gate <ID>`
+  first — the FR is in review on its branch with an open PR of this repository
+  that does not conflict and has no red check; the local log's last event is
+  no stopped gate; the acceptance check is recorded with nothing failed and
+  nothing unverified the user did not accept; the branch deletes no test file
+  and adds no focused or skipped test; no CI skip marker in the PR or a commit
+  — and then asks GitHub with `gh pr merge --auto --<merge_method>`: GitHub
+  merges at once when the base branch's rules are met, otherwise as soon as
+  they are. **The rules decide, never this session:** no `gh pr merge` by
+  hand, never `--admin`, never a bypass. Exit 4 → the reasons go into the
+  report, the PR stays open, step 7 runs as if `auto_merge` were off.
+- `auto_merge: off` (default) → nothing: the merge is the user's.
+
 ## 7. Notify and report
 
 - `notify_issues`: `never` → nothing; `ask` → offer it; `always` → post. One new
@@ -299,7 +314,9 @@ Only when no criterion failed, and the user accepted any unverified ones:
   — in the issue's language, the text is a template (*Language* in the model).
   The FR's body stays as it was at the start; the result lives in the FR doc and
   the PR.
-- `fr.sh project-status <issue> approval` — the merge is the user's.
+- `fr.sh project-status <issue> approval` — the merge is the user's, or
+  GitHub's after step 6b.
 - Report in one block: PR link · CI · deployment · acceptance check per criterion
-  · review findings accepted or reported · the board status, or why it was not
-  written · what is left: the merge (the user's), then `/fr-workflow:done <ID>`.
+  · review findings accepted or reported · the merge request (step 6b) or
+  why there was none · the board status, or why it was not written · what is
+  left: the merge (the user's, or GitHub's), then `/fr-workflow:done <ID>`.

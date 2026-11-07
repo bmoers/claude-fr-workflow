@@ -26,7 +26,8 @@ tokens.
 | `issue_repo`              | this repository                                               | `owner/repo` where requests and FR issues live, if not here. Whoever reads them reads the FR specs                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `project`                 | —                                                             | title of a GitHub project: `new` adds every FR issue to it. Needs the `project` scope on the `gh` token (`gh auth refresh -s project`)                                                                                                                                                                                                                                                                                                                                                                              |
 | `project_status_field`    | `Status`                                                      | the project's single-select status column that `project_status` writes                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `project_status`          | —                                                             | `event=value` pairs, comma-separated: the column value each plugin event sets — `defined`, `running`, `input`, `implemented`, `failed`, `blocked`, `approval`, `done`; events left out write nothing. Empty = the project's own workflows move the cards. See [board status](#board-status)                                                                                                                                                                                                                         |
+| `project_status`          | —                                                             | `event=value` pairs, comma-separated: the column value each plugin event sets — `planning`, `defined`, `running`, `implemented`, `review`, `shipping`, `input`, `failed`, `blocked`, `approval`, `done`; events left out write nothing. With `project_phase_field` a value may be `Phase/Status`. Empty = the project's own workflows move the cards. See [board status](#board-status)                                                                                                                             |
+| `project_phase_field`     | —                                                             | the project's single-select **phase** column (Backlog, Planning, Building, Review, Done), when it has one: `project_status` values `Phase/Status` then write both fields; a value without a phase leaves the phase as it is. Empty = statuses only                                                                                                                                                                                                                                                                  |
 | `notify_issues`           | `ask`                                                         | "ready for acceptance" comment on the FR issue and its requests after a successful ship: `never`, `ask`, `always`. With the autopilot `never` or `always` — a launched session cannot ask                                                                                                                                                                                                                                                                                                                           |
 | `review_gate`             | `stop`                                                        | code review findings `stop` the ship, or are only collected for the `report`                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `security_gate`           | `stop`                                                        | the same for security review findings — set separately, so style findings can be `report` while security findings still stop. **Secrets always stop**, whatever this says. Missing in an older profile → `stop`                                                                                                                                                                                                                                                                                                     |
@@ -59,6 +60,11 @@ tokens.
 | `fix_attempts`            | `2`                                                           | fix sessions per FR; then the FR is reported                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `fix_skip_checks`         | `[]`                                                          | check names that always stop, never go to the fix loop — security scanners above all, e.g. `[CodeQL, gitleaks]`                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `fix_comment_bots`        | `[]`                                                          | bots whose PR comments count as trusted for `checks+comments`, e.g. your review workflow's `[claude[bot]]`. People count when GitHub's collaborator permission says `admin` or `write`, looked up per login; a bot only in its bot form, `app/<name>` or `<name>[bot]`                                                                                                                                                                                                                                              |
+| `autopilot_queue`         | `manual`                                                      | where the autopilot's queue comes from: `manual` = `fr.sh queue add`; `project` = the board — every `pipeline` call takes the open FR issues standing on the square `project_status` maps `defined` to, filtered by `autopilot_assignee`. See [autopilot queue from the board](#autopilot-queue-from-the-board)                                                                                                                                                                                                     |
+| `autopilot_assignee`      | —                                                             | with `autopilot_queue: project`: a GitHub login = only FRs assigned to that person; `none` = only unassigned FRs; empty = any. One autopilot per developer on one repository, plus a shared one for `none`. A fact about the machine, not the project: set it in `.claude/workflow.local.md` — see [per-machine values](#per-machine-values)                                                                                                                                                                        |
+| `autopilot_finish`        | `off`                                                         | `on` = after the merge the autopilot runs `fr.sh finish`: worktree hook, worktree, local branch, the board's `done`, out of the queue. Issues and requests stay with `done`                                                                                                                                                                                                                                                                                                                                         |
+| `auto_merge`              | `off`                                                         | `auto` = after the acceptance check the ship session runs `fr.sh merge`: the merge gate, then `gh pr merge --auto` — GitHub merges when the base branch's rules are met. `off` = the merge is yours. See [auto-merge](#auto-merge)                                                                                                                                                                                                                                                                                  |
+| `merge_method`            | `squash`                                                      | for `fr.sh merge`: `squash`, `merge` or `rebase` — must be one the repository allows                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ## Choosing `deploy_signal`
 
@@ -130,7 +136,22 @@ project_status: "defined=Ready, running=Running, input=Waiting for Input, failed
 | `done`     | `done` closed it, merged or dropped                                                                                                |
 
 The values are the board's own option names — map only the events you have a
-value for. Values the column does not have yet: `fr.sh project-options` (from
+value for. A board with a **phase** column beside the status — one square per
+phase, the status inside it — gets `project_phase_field` and `Phase/Status`
+values; `input`, `failed` and `blocked` stay without a phase, so a question or
+a red gate keeps the card where it is:
+
+```yaml
+project: Product Factory
+project_status_field: Status
+project_phase_field: Phase
+project_status: "planning=Planning/Running, defined=Building/Ready, input=Waiting for Input, running=Building/Running, implemented=Building/Complete, review=Review/Ready, shipping=Review/Running, failed=Failed, blocked=Blocked, approval=Review/Waiting for Approval, done=Done/Complete"
+```
+
+`planning` is written by `new` before `defined` or `input`, `review` by the
+autopilot when it hands an FR to its ship session, `shipping` by `ship` when it
+starts; without phases they map to the same statuses as their neighbours, or
+to nothing. Values the column does not have yet: `fr.sh project-options` (from
 the repository, with the profile in place) adds them, grey, and keeps every
 existing option with its id, colour and text; `init` offers it. The project's
 workflows have no API — set them on its *Workflows* page: *Item added to
@@ -145,6 +166,47 @@ is reported by the command and never stops it. The project must belong to the
 owner of the issue repository — the organisation or user — like
 `gh issue create --project`. Keep GitHub's *Item closed* workflow on as the
 safety net for issues closed by hand.
+
+## Autopilot queue from the board
+
+`autopilot_queue: project` makes the board the autopilot's inbox. At every
+`pipeline` call, `fr.sh queue sync` takes the open FR issues of the issue
+repository (label `fr`) whose status — and phase, with `project_phase_field` —
+is what `project_status` maps `defined` to, and whose assignees fit
+`autopilot_assignee`. Moving a card onto that square and assigning it is how a
+person hands an FR to the factory. Several autopilots can share one
+repository: each developer's with their own login, a shared one with `none`;
+FRs one of them started are on `origin` and count in everyone's waves. The
+board unreadable is a line on stderr; the queue stays as it was.
+
+## Auto-merge
+
+`auto_merge: auto` hands the merge to GitHub. After the acceptance check the
+ship session runs `fr.sh merge <ID>`: `fr.sh merge-gate` checks that the FR is
+in review on its branch with an open PR of this repository that does not
+conflict and has no red check, that the local log's last event is no stopped
+gate, that the acceptance check is recorded with nothing failed and nothing
+unverified left unaccepted, that the branch deletes no test file and adds no
+focused or skipped test (`.only(`, `.skip(`, `xit(`, `@pytest.mark.skip`, …
+in test files), and that no CI skip marker sits in the PR or a commit. Then
+`gh pr merge --auto --<merge_method>`: GitHub merges at once when the base
+branch's rules — required checks, reviews, a merge queue — are met, otherwise
+as soon as they are. The rules are the gate: put them into a ruleset on the
+base branch, keep the merging account out of its bypass list, and enable
+*Allow auto-merge* in the repository. The plugin never uses `--admin`. The
+pipeline shows such a PR as `merging`; with `autopilot_finish: on` the
+autopilot cleans up after the merge.
+
+**Auto mode.** A ship session in `session_permission_mode: auto` runs under
+Claude Code's classifier, which blocks *merging a pull request no human has
+approved* by default — and `fr.sh merge` is that, in its eyes; run from a
+session without an allow rule it was refused. The ship skill's `allowed-tools`
+rule for `fr.sh` resolves before the classifier. If a session is still refused,
+add an `autoMode.allow` entry to **user** settings (`~/.claude/settings.json`;
+the classifier ignores `autoMode` in project settings) saying what `fr.sh
+merge` does: it enables GitHub's auto-merge after the plugin's merge gate, and
+the base branch's ruleset decides. The [container](container.md) writes that
+entry itself.
 
 ## Worktree hooks
 
@@ -221,6 +283,29 @@ copy; `fr.sh hook`, `pipeline`, `launch`, `fix-brief`, `deployment` and
 sessions once its branch has it: merge the base branch into the FR branch, or
 change the profile before the FR starts.
 
+## Per-machine values
+
+Some values describe the machine the autopilot runs on, not the project: whose
+FRs it takes, how it notifies, how its sessions ask for permission. They go
+into `.claude/workflow.local.md` beside the profile — the same frontmatter
+form, ignored by git (`init` adds it to `.gitignore`):
+
+```yaml
+---
+autopilot_assignee: florian
+notify_command: terminal-notifier -message "$FR_MESSAGE"
+---
+```
+
+A value there wins over the profile's; an empty value falls back to it. Only
+these keys are read from the local file: `autopilot_assignee`,
+`notify_command`, `session_permission_mode`, `autopilot_model`,
+`autopilot_effort`. Any other key there is ignored and `fr.sh check` says so —
+what the project decides stays in the committed profile. The local file is read
+where `fr.sh` runs: the main checkout for the autopilot, `pipeline`, `launch`
+and `queue sync`; an FR worktree does not have it. The
+[container](container.md) writes it from its environment.
+
 ## Fix loop
 
 Without `fix_loop`, every stopped gate waits for you — the autopilot reports it.
@@ -241,14 +326,14 @@ outside the team.
 
 ## Prose sections
 
-| Section                         | What to write                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Commit and PR conventions**   | e.g. "Conventional Commits, enforced by commitlint. The PR title becomes the squash-merge title and is linted. The FR id goes into the subject: `feat(checkout): coupon field (FR-47)`."                                                                                                                                                                                                                                                    |
-| **Local checks before commit**  | the fast commands: `npm run typecheck`, `npm run lint`, `npm test` — and security tools the project already uses, **scoped to the FR's changes**: `gitleaks detect --log-opts="origin/main..HEAD"`, or `git diff --quiet origin/main...HEAD -- package-lock.json \|\| npm audit --audit-level=high` (audit only when the lockfile changed). A full audit belongs in CI — unscoped, a new advisory anywhere in the tree would block every FR |
-| **CI**                          | which PR checks matter, how long they usually take; whether the first push of an FR branch, which changes only its FR document, starts builds, and how that is handled (e.g. `paths-ignore` on the push trigger)                                                                                                                                                                                                                            |
-| **Test environment**            | how a PR gets there, the URL, how to get in (SSO, Cloudflare Access, basic auth), test accounts by name or role, which data may be used                                                                                                                                                                                                                                                                                                     |
-| **Deploy verification**         | optional read-only commands that prove what runs, e.g. `kubectl -n staging get deploy -o wide`                                                                                                                                                                                                                                                                                                                                              |
-| **Hard rules for this project** | what must never happen here. Point to `CLAUDE.md` sections instead of copying them                                                                                                                                                                                                                                                                                                                                                          |
+| Section                         | What to write                                                                                                                                                                                                                                                      |     |                                                                                                                                                                       |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Commit and PR conventions**   | e.g. "Conventional Commits, enforced by commitlint. The PR title becomes the squash-merge title and is linted. The FR id goes into the subject: `feat(checkout): coupon field (FR-47)`."                                                                           |     |                                                                                                                                                                       |
+| **Local checks before commit**  | the fast commands: `npm run typecheck`, `npm run lint`, `npm test` — and security tools the project already uses, **scoped to the FR's changes**: `gitleaks detect --log-opts="origin/main..HEAD"`, or `git diff --quiet origin/main...HEAD -- package-lock.json \ | \   | npm audit --audit-level=high` (audit only when the lockfile changed). A full audit belongs in CI — unscoped, a new advisory anywhere in the tree would block every FR |
+| **CI**                          | which PR checks matter, how long they usually take; whether the first push of an FR branch, which changes only its FR document, starts builds, and how that is handled (e.g. `paths-ignore` on the push trigger)                                                   |     |                                                                                                                                                                       |
+| **Test environment**            | how a PR gets there, the URL, how to get in (SSO, Cloudflare Access, basic auth), test accounts by name or role, which data may be used                                                                                                                            |     |                                                                                                                                                                       |
+| **Deploy verification**         | optional read-only commands that prove what runs, e.g. `kubectl -n staging get deploy -o wide`                                                                                                                                                                     |     |                                                                                                                                                                       |
+| **Hard rules for this project** | what must never happen here. Point to `CLAUDE.md` sections instead of copying them                                                                                                                                                                                 |     |                                                                                                                                                                       |
 
 ## Example
 

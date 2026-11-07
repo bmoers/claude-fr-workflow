@@ -148,9 +148,11 @@ code you read.
    rewritten issue. Missing scope → tell the user to run
    `gh auth refresh -s project`, and go on without.
    Then its board column, when the profile maps it (`project_status`):
-   `fr.sh project-status <n> defined` — `input` instead when the user left
-   something under *Open questions*. Exit 5 (not written) is a line in the
-   report, never a stop.
+   `fr.sh project-status <n> planning` first for an issue just created or
+   refined here — on a board with phases that puts it into the planning
+   phase — then `fr.sh project-status <n> defined`, or `input` instead when
+   the user left something under *Open questions*. Exit 5 (not written) is a
+   line in the report, never a stop.
 5. **Notes to authors**, only on issues the current user
    (`gh api user -q .login`) did not open — in the issue's language; the texts
    below are templates (*Language* in the model):

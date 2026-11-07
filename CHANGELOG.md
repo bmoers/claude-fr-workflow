@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.8.0] — 2026-11-07
+
+For an autonomous factory: the board hands FRs to the autopilot, the ship
+session may hand the merge to GitHub, and the autopilot cleans up after it.
+
+### Added
+
+- **Phases on the board:** `project_phase_field` names a second single-select
+  column (Backlog, Planning, Building, Review, Done); `project_status` values
+  may then be `Phase/Status`, written as two edits. A value without a phase
+  leaves the phase as it is — `input`, `failed` and `blocked` keep the card
+  where it stopped. Three events so every phase change has one: `planning`
+  (`new`, before `defined` or `input`), `review` (`fr.sh launch ship`, the
+  hand-off to the ship session), `shipping` (`ship` at its start, instead of
+  `running`).
+- **The queue from the board:** `autopilot_queue: project` — every `pipeline`
+  call runs `fr.sh queue sync`, which takes the open FR issues of the issue
+  repository standing on the square `project_status` maps `defined` to,
+  filtered by `autopilot_assignee` (a login, `none` for unassigned FRs, empty
+  for any). Several autopilots share one repository by assignment. Read
+  through GraphQL with pagination; an unreadable board is a line on stderr,
+  never a stop. `fr.sh queue sync` by hand shows what it takes.
+- **`fr.sh merge-gate <ID>`:** the deterministic checks before a merge request
+  — in review on its branch, an open PR of this repository that does not
+  conflict and has no red check (pending is fine), the local log's last event
+  no stopped gate, the acceptance check recorded with nothing failed and
+  nothing unverified left unaccepted, no test file deleted on the branch, no
+  focused or skipped test added in a test file, no CI skip marker in the PR
+  or a commit. Exit 4 with every reason.
+- **`fr.sh merge <ID>` and `auto_merge`:** with `auto_merge: auto` the ship
+  session's step 6b runs the gate and then `gh pr merge --auto
+  --<merge_method>` (`merge_method`, default `squash`): GitHub merges at once
+  when the base branch's rules are met, otherwise when they are. The rules
+  decide — never `--admin`, never a bypass; the pipeline shows the PR as
+  `merging` and does not report it as waiting for the user. Default `off`:
+  nothing changes.
+- **`fr.sh finish <ID>` and `autopilot_finish`:** after the merge the
+  autopilot's action is `finish` — the worktree hook, the worktree (never on
+  uncommitted changes; the autopilot's own idle session is ended first,
+  anyone else's stops it), the local branch (`-d`; after a squash merge with
+  *Delete branch on merge* git refuses, so `-D` when the branch tip is the
+  merged PR's head — nothing is lost then), the board's `done`, out of the
+  queue. A finish that fails is logged and reported once. Issues and requests
+  stay with `done`. Default `off`.
+- **Per-machine profile values:** `.claude/workflow.local.md` beside the
+  profile, ignored by git, may set `autopilot_assignee`, `notify_command`,
+  `session_permission_mode`, `autopilot_model` and `autopilot_effort` — facts
+  about the machine, not the project. A value there wins; other keys are
+  ignored, `fr.sh check` names them and a missing `.gitignore` entry.
+- **The autopilot container** (`docker/`, [docs/container.md](docs/container.md)):
+  an image with Claude Code pinned, gh, git, jq and a Chromium under Xvfb for
+  the Playwright server, run as an unprivileged user; its entrypoint clones
+  the repository, registers the plugin marketplaces at the repository's pinned
+  tag, writes the trust, the per-machine profile and the classifier's auto-mode
+  context, and keeps `fr.sh launch autopilot` alive. Tokens come from the
+  environment (`claude setup-token`, a gh token), never from the image. The
+  workflow `image.yml` publishes it as
+  `ghcr.io/bmoers/fr-workflow-autopilot:<tag>` for arm64 and amd64 on every
+  release tag; the manual in `docs/container.md` takes a developer from the
+  tokens to the first FR. First run 2026-11-07 against the sandbox.
+- The PR facts carry whether auto-merge is enabled (`autoMergeRequest`).
+
+### Changed
+
+- The hard rule *never merge a PR* reads *never merge a PR by own judgement*:
+  with `auto_merge: auto` the ship session asks GitHub through `fr.sh merge`
+  after the gate; no other command merges, approves or closes a PR, the
+  autopilot never does.
+- `ship` writes `shipping` at its start where it wrote `running`; profiles
+  without a value for it write nothing there — map it like `running`.
+- `init` proposes `project_phase_field` and `Phase/Status` values for a board
+  with a phase column, and `.claude/workflow.local.md` for `.gitignore`.
+- The autopilot skill says in so many words that a board queue never ends the
+  loop: an empty queue is a wait, not an end — a sandbox run showed a session
+  ending there, and every relaunch costs a session start.
+
 ## [0.7.1] — 2026-11-06
 
 ### Security

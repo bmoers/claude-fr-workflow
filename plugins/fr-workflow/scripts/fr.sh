@@ -33,7 +33,8 @@
 #                                  record the event in the local FR log, then the
 #                                  FR's status column in the GitHub project, per
 #                                  project_status; exit 5 if not written
-#   fr.sh queue add|rm|list|clear|session [<ID>...]
+#   fr.sh queue add|rm|sync|list|clear|session [<ID>...]
+#                                  sync: FRs the board holds ready (autopilot_queue: project)
 #                                  the autopilot's FRs; session = its session id
 #   fr.sh pipeline [--no-fetch] [--wait <s> [--max <s>]]
 #                                  per queued FR: phase, next action, detail
@@ -41,6 +42,9 @@
 #   fr.sh launch autopilot         start a background session for the FR or the
 #                                  autopilot itself; prints the session id
 #   fr.sh fix-brief <ID>           what the next fix session is to fix
+#   fr.sh merge-gate <ID> [--no-fetch]  the checks before a merge request; exit 4 with reasons
+#   fr.sh merge <ID>               after the gate, gh pr merge --auto (auto_merge: auto)
+#   fr.sh finish <ID>              after the merge: hook, worktree, branch, board, queue
 #   fr.sh hook setup|teardown <ID> <path>
 #                                  the profile's worktree_setup / worktree_teardown
 #                                  in that worktree, the FR in its environment;
@@ -66,6 +70,12 @@
 set -euo pipefail
 
 PROFILE='.claude/workflow.md'
+# Per-machine values beside the profile, ignored by git: which login this
+# machine's autopilot serves, how it notifies, which permission mode its
+# sessions run in. Only these keys are read from it — everything else about
+# the project stays in the committed profile.
+PROFILE_LOCAL='.claude/workflow.local.md'
+LOCAL_KEYS=' autopilot_assignee notify_command session_permission_mode autopilot_model autopilot_effort '
 ISSUE_LIMIT=1000
 
 die() { echo "fr.sh: $*" >&2; exit 1; }
@@ -83,24 +93,27 @@ g() { git -c core.quotePath=false "$@"; }
 caller_path() { case "$1" in /*) echo "$1" ;; *) echo "$CALLER/$1" ;; esac; }
 
 # Flat `key: value` lookup in the profile frontmatter, with a default.
+cfg_in() { # <file> <key> — the key's value in that file's frontmatter
+  awk -v k="$2" '
+    { sub(/\r$/, "") }
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { exit }
+    {
+      i = index($0, ":"); if (i == 0) next
+      if (substr($0, 1, i - 1) != k) next
+      v = substr($0, i + 1); sub(/^[ \t]+/, "", v)
+      # a quoted value ends at its closing quote — a " #" inside it is part of
+      # the value; unquoted, " #" starts a comment
+      if (substr(v, 1, 1) == "\"" && (q = index(substr(v, 2), "\"")) > 0) v = substr(v, 2, q - 1)
+      else { sub(/^#.*$/, "", v); sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v) }
+      print v; exit
+    }' "$1"
+}
+
 cfg() {
   local v=""
-  if [ -f "$PROFILE" ]; then
-    v=$(awk -v k="$1" '
-      { sub(/\r$/, "") }
-      NR == 1 { if ($0 != "---") exit; next }
-      $0 == "---" { exit }
-      {
-        i = index($0, ":"); if (i == 0) next
-        if (substr($0, 1, i - 1) != k) next
-        v = substr($0, i + 1); sub(/^[ \t]+/, "", v)
-        # a quoted value ends at its closing quote — a " #" inside it is part of
-        # the value; unquoted, " #" starts a comment
-        if (substr(v, 1, 1) == "\"" && (q = index(substr(v, 2), "\"")) > 0) v = substr(v, 2, q - 1)
-        else { sub(/^#.*$/, "", v); sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v) }
-        print v; exit
-      }' "$PROFILE")
-  fi
+  case "$LOCAL_KEYS" in *" $1 "*) [ ! -f "$PROFILE_LOCAL" ] || v=$(cfg_in "$PROFILE_LOCAL" "$1") ;; esac
+  if [ -z "$v" ] && [ -f "$PROFILE" ]; then v=$(cfg_in "$PROFILE" "$1"); fi
   if [ -n "$v" ]; then echo "$v"; else echo "$2"; fi
 }
 
@@ -818,7 +831,7 @@ EOF
 # (--url --field --value), which gh has since 2.97. Best effort by design: the
 # board never stops a skill — exit 5 when the status could not be written, the
 # reason on stderr, and the skill mentions it in its report.
-PS_EVENTS='defined input running implemented failed blocked approval done'
+PS_EVENTS='planning defined input running implemented review shipping failed blocked approval done'
 GH_MIN=2.97
 
 gh_version() { gh --version 2>/dev/null | awk 'NR == 1 { print $3 }' || true; }
@@ -847,9 +860,21 @@ project_lookup() {
   if [ -z "$PROJ_NUM" ]; then echo "fr.sh: no project '$2' under $1" >&2; exit 5; fi
 }
 
+# The value project_status maps an event to: "k=v, k=v", records split at
+# commas, the key before the first "=". Empty when the event has none.
+ps_value() { # <event> <map>
+  printf '%s' "$2" | awk -v e="$1" 'BEGIN { RS = "," }
+    {
+      i = index($0, "="); if (i == 0) next
+      k = substr($0, 1, i - 1); v = substr($0, i + 1)
+      gsub(/^[ \t\n]+|[ \t\n]+$/, "", k); gsub(/^[ \t\n]+|[ \t\n]+$/, "", v)
+      if (k == e) { print v; exit }
+    }'
+}
+
 cmd_project_status() {
   [ $# -eq 2 ] || [ $# -eq 3 ] || die "usage: fr.sh project-status <issue> <event> [<gate>]"
-  local ref event="$2" gate="${3:-}" map title field owner url value out num ver
+  local ref event="$2" gate="${3:-}" map title field owner url value out num ver pfield phase
   case " $PS_EVENTS " in
     *" $event "*) ;;
     *) die "unknown event '$event' — one of: $PS_EVENTS" ;;
@@ -865,15 +890,18 @@ cmd_project_status() {
   if [ -z "$map" ]; then echo "project status: not configured (no project_status in the profile)"; return 0; fi
   title=$(cfg project "")
   if [ -z "$title" ]; then echo "fr.sh: project_status is set but project is empty — status not written" >&2; exit 5; fi
-  # "k=v, k=v": records split at commas, the key before the first "="
-  value=$(printf '%s' "$map" | awk -v e="$event" 'BEGIN { RS = "," }
-    {
-      i = index($0, "="); if (i == 0) next
-      k = substr($0, 1, i - 1); v = substr($0, i + 1)
-      gsub(/^[ \t\n]+|[ \t\n]+$/, "", k); gsub(/^[ \t\n]+|[ \t\n]+$/, "", v)
-      if (k == e) { print v; exit }
-    }')
+  value=$(ps_value "$event" "$map")
   if [ -z "$value" ]; then echo "project status: no value for '$event' in project_status — nothing written"; return 0; fi
+  # "Phase/Status" writes two single-select fields; "Status" alone leaves the
+  # phase as it is (input, failed, blocked belong to whatever phase runs)
+  pfield=$(cfg project_phase_field ""); phase=""
+  case "$value" in
+    */*)
+      phase=${value%%/*}; value=${value#*/}
+      phase=$(printf '%s' "$phase" | sed 's/[[:space:]]*$//'); value=$(printf '%s' "$value" | sed 's/^[[:space:]]*//')
+      if [ -z "$pfield" ]; then echo "fr.sh: project_status maps '$event' to '$phase/$value' but the profile has no project_phase_field — status not written" >&2; exit 5; fi
+      [ -n "$phase" ] && [ -n "$value" ] || die "project_status: '$event' needs Phase/Status, got '$phase/$value'" ;;
+  esac
   if ! command -v gh >/dev/null; then echo "fr.sh: gh not found — project status not written" >&2; exit 5; fi
   ver=$(gh_version)
   if gh_older_than "$GH_MIN" "$ver"; then echo "fr.sh: gh $ver is older than $GH_MIN — project status not written; upgrade gh" >&2; exit 5; fi
@@ -887,7 +915,14 @@ cmd_project_status() {
   if ! out=$(gh project item-edit "$num" --owner "$owner" --url "$url" --field "$field" --value "$value" 2>&1); then
     echo "fr.sh: project status not written for $ref — $out" >&2; exit 5
   fi
-  echo "project status: $ref → $value ($title)"
+  if [ -n "$phase" ]; then
+    if ! out=$(gh project item-edit "$num" --owner "$owner" --url "$url" --field "$pfield" --value "$phase" 2>&1); then
+      echo "fr.sh: project status written for $ref ($value), but not its phase — $out" >&2; exit 5
+    fi
+    echo "project status: $ref → $phase / $value ($title)"
+  else
+    echo "project status: $ref → $value ($title)"
+  fi
 }
 
 # The values of the status column. GitHub's `updateProjectV2Field` replaces the
@@ -1596,6 +1631,67 @@ pm_args() {
 queue_file() { echo "$(state_dir)/autopilot.queue"; }
 queue_ids() { local q; q=$(queue_file); if [ -f "$q" ]; then cat "$q"; fi; }
 
+# The board's square an FR waits on for the autopilot: Status (and Phase) as
+# project_status maps `defined`. Prints the open FR issues of the issue
+# repository standing there whose assignees fit autopilot_assignee — a login,
+# `none` for unassigned ones, empty for any — as "number<TAB>logins". Exit 5
+# when the board cannot be read, with the reason.
+board_ready() {
+  local title owner map value pfield phase pq out
+  title=$(cfg project ""); [ -n "$title" ] || { echo "fr.sh: autopilot_queue is project, but the profile has no project" >&2; return 5; }
+  map=$(cfg project_status "")
+  value=$(ps_value defined "$map")
+  [ -n "$value" ] || { echo "fr.sh: autopilot_queue is project, but project_status maps no 'defined' value — the board has no square for ready FRs" >&2; return 5; }
+  pfield=$(cfg project_phase_field ""); phase=""
+  case "$value" in
+    */*) phase=$(printf '%s' "${value%%/*}" | sed 's/[[:space:]]*$//'); value=$(printf '%s' "${value#*/}" | sed 's/^[[:space:]]*//')
+         [ -n "$pfield" ] || { echo "fr.sh: project_status maps 'defined' to '$phase/$value' but the profile has no project_phase_field" >&2; return 5; } ;;
+  esac
+  command -v gh >/dev/null || { echo "fr.sh: gh not found — board not read" >&2; return 5; }
+  dr_init; owner=${DR%%/*}
+  project_lookup "$owner" "$title"
+  pq=""; [ -z "$pfield" ] || pq="phase: fieldValueByName(name: $(json_str "$pfield")) { ... on ProjectV2ItemFieldSingleSelectValue { name } }"
+  # one page of 100 per call; --paginate follows pageInfo
+  if ! out=$(gh api graphql --paginate -f query="query(\$endCursor: String) { repositoryOwner(login: $(json_str "$owner")) { ... on ProjectV2Owner { projectV2(number: $PROJ_NUM) { items(first: 100, after: \$endCursor) { pageInfo { hasNextPage endCursor } nodes { content { ... on Issue { number state repository { nameWithOwner } labels(first: 30) { nodes { name } } assignees(first: 10) { nodes { login } } } } status: fieldValueByName(name: $(json_str "$(cfg project_status_field Status)")) { ... on ProjectV2ItemFieldSingleSelectValue { name } } $pq } } } } } }" \
+        --jq '.data.repositoryOwner.projectV2.items.nodes[] | select(.content.number != null) | [(.content.number | tostring), (.content.repository.nameWithOwner | ascii_downcase), .content.state, ([.content.labels.nodes[].name] | join(",")), (.status.name // "-"), (.phase.name // "-"), (([.content.assignees.nodes[].login] | join(",")) | if . == "" then "-" else . end)] | join("\t")' 2>&1); then
+    echo "fr.sh: cannot read the items of '$title' — $out" >&2; return 5
+  fi
+  printf '%s\n' "$out" | repo="$DR" st="$value" ph="$phase" who="$(cfg autopilot_assignee "")" awk -F '\t' '
+    BEGIN { repo = ENVIRON["repo"]; st = tolower(ENVIRON["st"]); ph = tolower(ENVIRON["ph"]); who = tolower(ENVIRON["who"]) }
+    $2 != repo || $3 != "OPEN" { next }
+    { n = split($4, L, ","); ok = 0; for (i = 1; i <= n; i++) if (L[i] == "fr") ok = 1; if (!ok) next }
+    tolower($5) != st { next }
+    ph != "" && tolower($6) != ph { next }
+    {
+      a = tolower($7)
+      if (who == "none") { if (a != "-") next }
+      else if (who != "") { n = split(a, A, ","); ok = 0; for (i = 1; i <= n; i++) if (A[i] == who) ok = 1; if (!ok) next }
+      print $1 "\t" $7
+    }'
+}
+
+# queue sync: every FR the board holds ready for the autopilot (board_ready)
+# that is not queued and not merged or dropped joins the queue. Exit 0 with the
+# board unreadable too — the pipeline runs on; the reason goes to stderr.
+queue_sync() {
+  local ready q id added="" line num who ROWS st
+  [ "$(cfg autopilot_queue manual)" = project ] || { echo "queue: autopilot_queue is manual — nothing to sync (fr.sh queue add <ID>)"; return 0; }
+  ready=$(board_ready) || { echo "queue: board not read — the queue is as it was" >&2; return 0; }
+  q=$(queue_file); ROWS=$(rows 2>/dev/null) || ROWS=""
+  while IFS=$'\t' read -r num who; do
+    [ -n "$num" ] || continue
+    id="$PREFIX-$num"
+    if [ -f "$q" ] && grep -qxF "$id" "$q"; then continue; fi
+    st=$(printf '%s\n' "$ROWS" | awk -F '\t' -v id="$id" '$1 == id { print $2; exit }')
+    case "$st" in merged|dropped) continue ;; esac
+    echo "$id" >> "$q"; log_line "$id" "queued board${who:+ $who}"
+    added="$added${added:+, }$id"
+  done <<EOF
+$ready
+EOF
+  if [ -n "$added" ]; then echo "queue: added from the board — $added"; else echo "queue: nothing new on the board"; fi
+}
+
 cmd_queue() {
   local sub="${1:-list}" q a id
   [ $# -gt 0 ] && shift
@@ -1619,9 +1715,10 @@ cmd_queue() {
       done
       queue_ids ;;
     clear) rm -f "$q" "$(state_dir)/autopilot.seen" ;;
+    sync) queue_sync ;;
     list) queue_ids ;;
     session) if [ -f "$(state_dir)/autopilot.session" ]; then cat "$(state_dir)/autopilot.session"; fi ;;
-    *) die "usage: fr.sh queue add|rm|list|clear|session [<ID>...]" ;;
+    *) die "usage: fr.sh queue add|rm|sync|list|clear|session [<ID>...]" ;;
   esac
 }
 
@@ -1653,7 +1750,7 @@ pr_of() { # <branch> <doc pr>
 # One PR as lines: "pr state mergeable mergeStateStatus", "check name
 # fail|pending|pass", "comment epoch association login url" — comments, and
 # reviews that say something (a body, or changes requested).
-J_PR='"pr\t\(.state)\t\(.mergeable)\t\(.mergeStateStatus)",
+J_PR='"pr\t\(.state)\t\(.mergeable)\t\(.mergeStateStatus)\t\(if .autoMergeRequest then "auto" else "-" end)",
   (.statusCheckRollup[]? | "check\t\((.name // .context // "?") | gsub("\t"; " "))\t\(
      if ((.conclusion // .state // "") | IN("FAILURE","ERROR","TIMED_OUT","CANCELLED","ACTION_REQUIRED","STARTUP_FAILURE")) then "fail"
      elif ((.status // "") | IN("QUEUED","IN_PROGRESS","PENDING","WAITING","REQUESTED")) or ((.state // "") == "PENDING") then "pending"
@@ -1662,7 +1759,7 @@ J_PR='"pr\t\(.state)\t\(.mergeable)\t\(.mergeStateStatus)",
   (.reviews[]? | select(.submittedAt != null and (.state == "CHANGES_REQUESTED" or (.body // "") != ""))
      | "comment\t\(.submittedAt | fromdateiso8601)\t\(.authorAssociation)\t\(.author.login)\treview \(.state)")'
 
-pr_facts() { gh pr view "$1" -R "$(cur_repo)" --json state,mergeable,mergeStateStatus,statusCheckRollup,comments,reviews --jq "$J_PR"; }
+pr_facts() { gh pr view "$1" -R "$(cur_repo)" --json state,mergeable,mergeStateStatus,autoMergeRequest,statusCheckRollup,comments,reviews --jq "$J_PR"; }
 
 # Failing checks of the PR facts on stdin: "skip<TAB>name" for those in
 # fix_skip_checks (they always stop), "fix<TAB>name" for the others.
@@ -1740,12 +1837,17 @@ fix_verdict() { # <what> <class> <nf>
 # "phase<TAB>action<TAB>detail" of one FR — the heart of the autopilot.
 # Actions: start, ship, fix, report, wait, none.
 phase_of() { # <row> <wave> <conflicts>
-  local id status loc ref docpr el ev eg ll lk ls nf ap wt reason own live sst spid lpid pr facts fails skips cmts
+  local id status loc ref docpr el ev eg ll lk ls nf ap wt reason own live sst spid lpid pr facts fails skips cmts fin
   id=$(printf '%s' "$1" | cut -f1); status=$(printf '%s' "$1" | cut -f2)
   loc=$(printf '%s' "$1" | cut -f3); ref=$(printf '%s' "$1" | cut -f4); docpr=$(printf '%s' "$1" | cut -f6)
   read_facts "$id"
   case "$status" in
-    merged)  printf 'merged\tnone\t\n'; return 0 ;;
+    merged)
+      if [ "$(cfg autopilot_finish off)" = on ]; then
+        fin=$(awk '$2 == "finish" { $1 = ""; $2 = ""; sub(/^  /, ""); f = $0 } END { print f }' "$(state_dir)/$id.log" 2>/dev/null)
+        if [ -n "$fin" ]; then printf 'merged\treport\tfinish failed: %s\n' "$fin"; else printf 'merged\tfinish\t\n'; fi
+      else printf 'merged\tnone\t\n'; fi
+      return 0 ;;
     dropped) printf 'dropped\tnone\t\n'; return 0 ;;
     open)
       if [ "$ev" = input ]; then printf 'waiting\treport\tthe start needs your decision: /fr-workflow:start %s\n' "$id"
@@ -1841,11 +1943,16 @@ phase_of() { # <row> <wave> <conflicts>
       printf 'review\t%s\n' "$(fix_verdict "PR #$pr: comments by $cmts" comments "$nf")"; return 0
     fi
   fi
-  printf 'review\tnone\tPR #%s waits for your merge\n' "$pr"
+  if [ "$(printf '%s\n' "$facts" | awk -F '\t' '$1 == "pr" { print $5 }')" = auto ]; then
+    printf 'merging\tnone\tPR #%s: auto-merge enabled, GitHub merges when the base branch rules are met\n' "$pr"
+  else
+    printf 'review\tnone\tPR #%s waits for your merge\n' "$pr"
+  fi
 }
 
 pipeline_once() {
   local ids open ov id row wave conf active limit ph
+  if [ "$(cfg autopilot_queue manual)" = project ]; then queue_sync >/dev/null || true; fi
   ids=$(queue_ids)
   printf 'id\tphase\taction\tdetail\n'
   [ -n "$ids" ] || return 0
@@ -2013,6 +2120,8 @@ cmd_launch() {
     fix)       sname="$id fix $n";  prompt="/fr-workflow:implement $id fix" ;;
     ship)      sname="$id ship";    prompt="/fr-workflow:ship $id" ;;
   esac
+  # the hand-off to the review phase: on the board (best effort) and in the log
+  if [ "$kind" = ship ]; then (cmd_project_status "$id" review) || true; fi
   cd "$(main_worktree)"
   set -- $pm
   out=$("$CLAUDE_BIN" -w "$name" --bg --model "$model" --effort "$effort" "$@" -n "$sname" "$prompt" 2>&1) ||
@@ -2025,6 +2134,188 @@ cmd_launch() {
 
 # What the next fix session is to fix: the gate that stopped the ship, or the
 # red checks and the trusted comments on the PR since the last approval.
+# Test files, for the merge gate: deleting one, or focusing or skipping a test,
+# never passes unnoticed. The living specs (spec_dir) are not tests.
+is_test_file() { grep -E '(^|/)(tests?|__tests__)/|\.(test|spec)\.[A-Za-z0-9]+$|_test\.(go|py|rb|rs)$|(^|/)test_[^/]*\.py$' || true; }
+TEST_MARKERS='\.only\(|\.skip\(|[^A-Za-z0-9_](xit|xdescribe|xtest|fit|fdescribe|ftest|iit|ddescribe)\(|@pytest\.mark\.skip|@unittest\.skip|@Disabled|@Ignore[^A-Za-z0-9_]|t\.Skip\('
+CI_SKIP='\[(skip ci|ci skip|no ci|skip actions|actions skip)\]|skip-checks:'
+
+# merge-gate <ID> [--no-fetch]: the deterministic checks before the ship session
+# asks GitHub to merge — exit 4 with every reason when one does not hold. The
+# FR is in review on its branch with an open PR of this repository that is not
+# conflicting and has no red check; the local log's last event is no stopped
+# gate; the FR doc records the acceptance check with nothing failed and nothing
+# unverified that the user did not accept; the branch deletes no test file and
+# adds no focused or skipped test; no CI skip marker anywhere. Pending checks
+# are fine — auto-merge waits for them.
+cmd_merge_gate() {
+  [ $# -ge 1 ] || die "usage: fr.sh merge-gate <ID> [--no-fetch]"
+  local id row status loc ref path docpr pr facts bad="" fails pend bref br sect f marks del skipm ev eg el ll lk ls nf ap n
+  id=$(fr_id "$1"); shift
+  [ "${1:-}" = --no-fetch ] || do_fetch
+  row=$(rows | awk -F '\t' -v id="$id" '$1 == id')
+  [ -n "$row" ] || die "no such FR: $id"
+  status=$(printf '%s' "$row" | cut -f2); loc=$(printf '%s' "$row" | cut -f3)
+  ref=$(printf '%s' "$row" | cut -f4); path=$(printf '%s' "$row" | cut -f5); docpr=$(printf '%s' "$row" | cut -f6)
+  [ "$status" = in-review ] || bad="$bad"$'\n'"- the FR doc says status: $status, not in-review (the acceptance check is not recorded)"
+  [ "$loc" = branch ] || bad="$bad"$'\n'"- $id is not on its FR branch ($loc)"
+  pr=""; n=0; pend=0
+  if [ "$loc" = branch ]; then
+    pr=$(pr_of "$ref" "$docpr")
+    if [ -z "$pr" ]; then bad="$bad"$'\n'"- no open PR of this repository for $ref"
+    elif ! facts=$(pr_facts "$pr" 2>/dev/null); then bad="$bad"$'\n'"- PR #$pr not readable"
+    else
+      case "$(printf '%s\n' "$facts" | awk -F '\t' '$1 == "pr" { print $2 "/" $3 }')" in
+        OPEN/CONFLICTING) bad="$bad"$'\n'"- PR #$pr conflicts with the base branch" ;;
+        OPEN/*) ;;
+        *) bad="$bad"$'\n'"- PR #$pr is $(printf '%s\n' "$facts" | awk -F '\t' '$1 == "pr" { print $2 }'), not open" ;;
+      esac
+      fails=$(printf '%s\n' "$facts" | awk -F '\t' '$1 == "check" && $3 == "fail" { print $2 }' | paste -sd ',' - | sed 's/,/, /g')
+      [ -z "$fails" ] || bad="$bad"$'\n'"- red checks on PR #$pr: $fails"
+      n=$(printf '%s\n' "$facts" | awk -F '\t' '$1 == "check" && $3 == "pass" { n++ } END { print n + 0 }')
+      pend=$(printf '%s\n' "$facts" | awk -F '\t' '$1 == "check" && $3 == "pending" { n++ } END { print n + 0 }')
+      skipm=$(gh pr view "$pr" -R "$(cur_repo)" --json title,body --jq '.title, .body' 2>/dev/null | grep -iE "$CI_SKIP" | head -n 1) || skipm=""
+      [ -z "$skipm" ] || bad="$bad"$'\n'"- a CI skip marker in the PR title or body: $skipm"
+    fi
+  fi
+  read_facts "$id"
+  case "$ev" in failed|blocked|input) bad="$bad"$'\n'"- the local log's last event is $ev${eg:+ $eg}: a gate stopped and nothing passed since" ;; esac
+  if [ "$loc" = branch ]; then
+    bref=$(base_ref); br=$(pick_ref "$ref")
+    sect=$(git show "$br:$path" 2>/dev/null | awk '/^## /{ p = ($0 ~ /^## Acceptance check/) } p')
+    if [ -z "$sect" ]; then bad="$bad"$'\n'"- the FR doc has no ## Acceptance check section"
+    else
+      f=$(printf '%s\n' "$sect" | grep -iE 'unverified' | grep -viE 'accepted by' | head -n 1) || f=""
+      [ -z "$f" ] || bad="$bad"$'\n'"- an unverified criterion nobody accepted: $f"
+      f=$(printf '%s\n' "$sect" | grep -iE '(^|[^a-z])failed([^a-z]|$)' | head -n 1) || f=""
+      [ -z "$f" ] || bad="$bad"$'\n'"- the acceptance check records a failure: $f"
+    fi
+    del=$({ g diff --name-only --diff-filter=D "$bref...$br" 2>/dev/null || true; } | is_test_file | paste -sd ',' - | sed 's/,/, /g')
+    [ -z "$del" ] || bad="$bad"$'\n'"- test files deleted on the branch: $del"
+    marks=$({ g diff --name-only --diff-filter=AM "$bref...$br" 2>/dev/null || true; } | is_test_file |
+      while IFS= read -r f; do
+        { g diff "$bref...$br" -- "$f" 2>/dev/null | grep '^+' | grep -v '^+++' | grep -E "$TEST_MARKERS" | head -n 1 |
+          f="$f" awk '{ print ENVIRON["f"] ": " substr($0, 2) }'; } || true
+      done | head -n 3 | paste -sd ';' - | sed 's/;/; /g')
+    [ -z "$marks" ] || bad="$bad"$'\n'"- a focused or skipped test added on the branch: $marks"
+    skipm=$(git log --format=%B "$bref..$br" 2>/dev/null | grep -iE "$CI_SKIP" | head -n 1) || skipm=""
+    [ -z "$skipm" ] || bad="$bad"$'\n'"- a CI skip marker in a commit message: $skipm"
+  fi
+  if [ -n "$bad" ]; then
+    echo "fr.sh: $id is not ready to merge:$bad" >&2; exit 4
+  fi
+  echo "merge-gate: $id PR #$pr ok — $n checks green, $pend pending; acceptance check recorded, no stopped gate, tests intact"
+}
+
+# merge <ID>: with auto_merge: auto, after the merge gate, ask GitHub to merge
+# the PR — `gh pr merge --auto`: merged at once when the base branch's rules are
+# already met, otherwise when they are. The rules decide, never this command;
+# no --admin, no bypass. Exit 4 = not asked, with the reason.
+cmd_merge() {
+  [ $# -eq 1 ] || die "usage: fr.sh merge <ID>"
+  local id mode method out pr
+  id=$(fr_id "$1")
+  mode=$(cfg auto_merge off)
+  case "$mode" in
+    auto) ;;
+    off) echo "fr.sh: auto_merge is off — the merge is the user's" >&2; exit 4 ;;
+    *) die "auto_merge must be off or auto, not '$mode'" ;;
+  esac
+  method=$(cfg merge_method squash)
+  case "$method" in squash|merge|rebase) ;; *) die "merge_method must be squash, merge or rebase, not '$method'" ;; esac
+  out=$(cmd_merge_gate "$id") || exit $?
+  echo "$out"
+  pr=$(printf '%s\n' "$out" | sed -n 's/^merge-gate: .* PR #\([0-9][0-9]*\) ok.*/\1/p')
+  [ -n "$pr" ] || die "merge-gate named no PR"
+  if ! out=$(gh pr merge "$pr" -R "$(cur_repo)" --auto "--$method" 2>&1); then
+    log_line "$id" "merge refused $pr"
+    echo "fr.sh: GitHub did not take the merge request for PR #$pr — $out" >&2; exit 4
+  fi
+  log_line "$id" "merge auto $pr"
+  echo "merge: PR #$pr handed to GitHub ($method) — merged when the base branch's rules are met: ${out:-auto-merge enabled}"
+}
+
+# The FR branch of an id, by name (fr_branch_re), local or on origin — a
+# merged FR's row points at the base branch, its branch may still be here.
+branch_of_id() { # <ID>
+  local idl; idl=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  fr_branches | awk -v id="$idl" 'index(tolower($0), id) {
+      s = tolower($0); i = index(s, id); b = (i == 1 ? "" : substr(s, i - 1, 1)); a = substr(s, i + length(id), 1)
+      if ((b == "" || b == "/" || b == "-") && (a == "" || a == "/" || a == "-")) print }' | head -n 1
+}
+
+# finish <ID>: after the merge, what needs no decision — the worktree hook,
+# the worktree, the local branch, the board, the queue. Issues and requests
+# stay with /fr-workflow:done. Exit 3 = not finished, with the reason, logged
+# so the pipeline reports it once instead of retrying.
+# The local branch ends exactly at the head of the merged PR: every commit on
+# it is in what GitHub merged, and -D loses nothing. git's -d cannot tell after
+# a squash merge once GitHub deleted the remote branch (delete-branch-on-merge).
+at_merged_pr_head() { # <pr> <branch>
+  local head
+  case "$1" in ""|-) return 1 ;; esac
+  head=$(gh pr view "$1" -R "$(cur_repo)" --json state,headRefOid --jq 'select(.state == "MERGED") | .headRefOid' 2>/dev/null) || return 1
+  [ -n "$head" ] || return 1
+  [ "$head" = "$(git rev-parse --verify --quiet "refs/heads/$2")" ]
+}
+
+cmd_finish() {
+  [ $# -eq 1 ] || die "usage: fr.sh finish <ID>"
+  local id row status docpr ref wt path reason lpid spid st rc out i el ev eg ll lk ls nf ap
+  id=$(fr_id "$1")
+  row=$(rows | awk -F '\t' -v id="$id" '$1 == id')
+  [ -n "$row" ] || die "no such FR: $id"
+  status=$(printf '%s' "$row" | cut -f2); docpr=$(printf '%s' "$row" | cut -f6)
+  if [ "$status" != merged ]; then echo "fr.sh: $id is $status, not merged — nothing to finish" >&2; exit 4; fi
+  # the row of a merged FR points at the base branch; the FR branch by its name
+  ref=$(branch_of_id "$id")
+  if [ -z "$ref" ] || [ "$ref" = "$BASE" ]; then
+    (cmd_project_status "$id" done) || true
+    cmd_queue rm "$id" >/dev/null
+    echo "finished $id: no FR branch here, board done, out of the queue — issues and requests: /fr-workflow:done $id"
+    return 0
+  fi
+  wt=$(wt_of "$ref")
+  if [ -n "$wt" ]; then
+    path=$(printf '%s' "$wt" | cut -f1); reason=$(printf '%s' "$wt" | cut -f2)
+    if held "$reason"; then
+      # the autopilot's own session lingering idle with its lock is ended; anyone else's is not
+      read_facts "$id"; load_agents; spid=""; st=unknown
+      if [ "$ls" != "-" ]; then spid=$(session_pid "$ls"); st=$(session_state "$ls"); fi
+      lpid=$(lock_pid "$reason")
+      if [ -n "$lpid" ] && [ "$lpid" = "$spid" ] && [ "$st" = idle ]; then
+        "$CLAUDE_BIN" stop "$ls" >/dev/null 2>&1 || true
+        i=0; while held "$(wt_of "$ref" | cut -f2)"; do i=$((i + 1)); [ "$i" -le 30 ] || break; sleep 1; done
+      fi
+      if held "$(wt_of "$ref" | cut -f2)"; then
+        log_line "$id" "finish a session still holds the worktree ($reason)"
+        echo "fr.sh: $id not finished — a session still holds $path ($reason): end it, or /fr-workflow:done $id" >&2; exit 3
+      fi
+    fi
+    rc=0; out=$( (cmd_hook teardown "$id" "$path") 2>&1 ) || rc=$?
+    printf '%s\n' "$out"
+    if [ "$rc" = "$HOOK_FAILED" ]; then
+      (cmd_project_status "$id" blocked teardown) || true
+      log_line "$id" "finish worktree_teardown failed"
+      echo "fr.sh: $id not finished — worktree_teardown failed; the worktree stays: /fr-workflow:done $id after a look" >&2; exit 3
+    fi
+    if ! out=$(git worktree remove "$path" 2>&1); then
+      log_line "$id" "finish worktree not removed: $(printf '%s' "$out" | head -n 1)"
+      echo "fr.sh: $id not finished — $out" >&2; exit 3
+    fi
+  fi
+  if git show-ref --verify --quiet "refs/heads/$ref"; then
+    if git branch -d "$ref" >/dev/null 2>&1; then echo "branch $ref deleted locally"
+    elif at_merged_pr_head "$docpr" "$ref" && git branch -D "$ref" >/dev/null 2>&1; then
+      echo "branch $ref deleted locally — its tip is the head of the merged PR #$docpr"
+    else echo "branch $ref kept: git refuses -d (origin/$ref gone, or unmerged commits) — /fr-workflow:done $id decides"
+    fi
+  fi
+  (cmd_project_status "$id" done) || true
+  cmd_queue rm "$id" >/dev/null
+  echo "finished $id: ${wt:+worktree removed, }board done, out of the queue — issues and requests: /fr-workflow:done $id"
+}
+
 cmd_fix_brief() {
   [ $# -eq 1 ] || die "usage: fr.sh fix-brief <ID>"
   local id row ref docpr pr facts el ev eg ll lk ls nf ap
@@ -2052,7 +2343,7 @@ cmd_fix_brief() {
 }
 
 cmd_check() {
-  local ok=1 repo project ver note
+  local ok=1 repo project ver note k v local_set local_other
   # cur_repo exits its subshell on failure, so test the assignment itself
   if repo=$(cur_repo 2>/dev/null) && [ -n "$repo" ]; then
     echo "repo:     $repo"
@@ -2060,6 +2351,12 @@ cmd_check() {
     echo "repo:     MISSING — no GitHub 'origin' remote"; ok=0
   fi
   if [ -f "$PROFILE" ]; then echo "profile:  $PROFILE"; else echo "profile:  MISSING ($PROFILE) — run /fr-workflow:init"; ok=0; fi
+  if [ -f "$PROFILE_LOCAL" ]; then
+    local_set=""; for k in $LOCAL_KEYS; do v=$(cfg_in "$PROFILE_LOCAL" "$k"); [ -z "$v" ] || local_set="$local_set $k=$v"; done
+    local_other=$(LK="$LOCAL_KEYS" awk 'NR == 1 { next } $0 == "---" { exit } /^[A-Za-z_]+:/ { k = $0; sub(/:.*/, "", k); if (index(ENVIRON["LK"], " " k " ") == 0) printf " %s", k }' "$PROFILE_LOCAL")
+    echo "local:    $PROFILE_LOCAL —${local_set:- nothing set}${local_other:+   not per-machine keys, ignored:$local_other}"
+    git check-ignore -q "$PROFILE_LOCAL" 2>/dev/null || echo "          NOT ignored by git — add $PROFILE_LOCAL to .gitignore"
+  fi
   echo "issues:   $(cfg issue_repo "${repo:-?}")"
   echo "fr_dir:   $FR_DIR   prefix: $PREFIX   base: $BASE"
   if [ -n "$(cfg worktree_setup "")" ] || [ -n "$(cfg worktree_teardown "")" ]; then
@@ -2107,6 +2404,9 @@ case "$cmd" in
   pipeline) cmd_pipeline "$@" ;;
   launch) cmd_launch "$@" ;;
   fix-brief) cmd_fix_brief "$@" ;;
+  merge-gate) cmd_merge_gate "$@" ;;
+  merge) cmd_merge "$@" ;;
+  finish) cmd_finish "$@" ;;
   hook) cmd_hook "$@" ;;
   notify) cmd_notify "$@" ;;
   validate) cmd_validate "$@" ;;

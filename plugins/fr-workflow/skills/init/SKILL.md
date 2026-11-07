@@ -90,12 +90,18 @@ Also propose:
 - `project_status`, with a project: whether its status column should follow the
   FRs. `gh project field-list <number> --owner <owner> --format json` shows the
   column (usually `Status`) and its options. Propose a mapping of the plugin's
-  events — `defined`, `running`, `input`, `failed`, `blocked`, `approval`,
-  `done` — onto those options, e.g.
+  events — `planning`, `defined`, `running`, `implemented`, `review`,
+  `shipping`, `input`, `failed`, `blocked`, `approval`, `done` — onto those
+  options, e.g.
   `defined=Todo, running=In Progress, approval=In Review, done=Done`, leaving
-  out events the board has no value for — or, when the user wants the plugin's
-  own vocabulary (Ready, Running, Waiting for Input, Waiting for Approval,
-  Blocked, Failed, Complete), values the column does not have yet:
+  out events the board has no value for. A board with a second single-select
+  column for the phase (Backlog, Planning, Building, Review, Done) gets
+  `project_phase_field: Phase` and `Phase/Status` values —
+  `defined=Building/Ready, shipping=Review/Running, done=Done/Complete`; a
+  value without a phase (`input`, `failed`, `blocked`) leaves the phase as it
+  is. Or, when the user wants the plugin's own vocabulary (Ready, Running,
+  Waiting for Input, Waiting for Approval, Blocked, Failed, Complete), values
+  the column does not have yet:
   `fr.sh project-options` adds them after the profile is written and the user
   agreed (existing options keep their id, colour and text). Needs `gh` 2.97 or
   newer wherever the commands run. Without the key GitHub's own workflows move
@@ -115,7 +121,8 @@ point to the `CLAUDE.md` sections instead of copying them.
   `<capability>/spec.md` at the first fold.
 - `<fr_dir>/README.md` from `${CLAUDE_PLUGIN_ROOT}/templates/fr-readme.md`. If a
   README exists there, propose a short section instead.
-- `.gitignore`: make sure `.claude/worktrees/` and `.playwright-mcp/` are listed,
+- `.gitignore`: make sure `.claude/worktrees/`, `.claude/workflow.local.md` (the
+  per-machine profile values) and `.playwright-mcp/` are listed,
   and whatever the worktree hooks generate (compose overrides, `.env` files,
   data directories) — ignored files never block `git worktree remove`.
 - `.dockerignore`, when the repository has a `Dockerfile` or a compose file:

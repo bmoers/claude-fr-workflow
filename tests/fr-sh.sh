@@ -46,7 +46,11 @@ case "$*" in
   "project item-edit"*) [ ! -f "$STUB/item-edit-fails" ] || { echo "option 'Complete' not found for field 'Status'" >&2; exit 1; } ;;
   "--version") answer version ;;
   "pr list"*) answer prlist ;;
+  "pr view"*"--json title,body"*) answer prtitle ;;
+  "pr view"*"--json state,headRefOid"*) answer prhead ;;
   "pr view"*) [ ! -f "$STUB/prview-fails" ] || exit 1; answer prview ;;
+  "pr merge"*) [ ! -f "$STUB/merge-fails" ] || { echo "GraphQL: Pull request is not mergeable (enablePullRequestAutoMerge)" >&2; exit 1; }; echo "✓ Pull request $2 will be automatically merged" ;;
+  "api graphql --paginate -f query="*) [ ! -f "$STUB/items-fails" ] || { echo "Could not resolve to a ProjectV2" >&2; exit 1; }; answer items ;;
   "api graphql -f query="*) answer options ;;
   "api graphql --input -"*) cat > "$STUB/mutation.in"; [ ! -f "$STUB/mutation-fails" ] || { echo "Field 'singleSelectOptions' nope" >&2; exit 1; }; answer mutated ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 1 ;;
@@ -466,6 +470,7 @@ check "launch: an unknown live session is never stopped (exit 3)" '[ "$rc" = 3 ]
 "$FR" launch ship FR-70 --replace sesMANUAL1 > "$SP/l.out" 2>&1; rc=$?
 check "launch: --replace stops that session, then the ship session with ship_model" '[ "$rc" = 0 ] && grep -qx "stop sesMANUAL1" "$CLAUDE_LOG" && grep -qx -- "-w fr-70-a --bg --model opus --effort high -n FR-70 ship /fr-workflow:ship FR-70" "$CLAUDE_LOG"' "exit $rc: $(cat "$SP/l.out" "$CLAUDE_LOG")"
 check "launch: records the session id" 'grep -qE " launch ship ses[0-9]+0a$" "$LOG70"' "$(cat "$LOG70")"
+check "launch ship: the hand-off to review is logged before the launch" '[ "$(grep -n " event review$" "$LOG70" | cut -d: -f1)" -lt "$(grep -n " launch ship " "$LOG70" | tail -n 1 | cut -d: -f1)" ]' "$(cat "$LOG70")"
 check "pipeline: launched but no session holds the worktree → stalled" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-70	stalled	report	the ship session"' "$("$FR" pipeline --no-fetch 2>&1)"
 { sleep 300 & } 2>/dev/null; echo $! > "$STUB/session.pid"; disown $!
 git worktree unlock .claude/worktrees/fr-70-a; git worktree lock --reason "claude session (pid $(cat "$STUB/session.pid"))" .claude/worktrees/fr-70-a
@@ -1079,6 +1084,231 @@ mkdir -p specs/win-paths && printf '# Win paths\n\n## Requirements\n\n### Requir
 FP_WIN=$("$FR" fingerprint win-paths 'Path C:\temp' --local 2>&1); rc=$?
 check "fingerprint: a requirement name with a backslash is found — the name is not escape-processed" '[ "$rc" = 0 ] && printf "%s" "$FP_WIN" | grep -qE "^[0-9a-f]{8}$"' "exit $rc: $FP_WIN"
 rm -rf specs/win-paths
+
+# --- 0.8: phases on the board, the queue from the board, merge gate, merge, finish
+newrepo "$SP/regress-m8" git@github.com:acme/m8.git
+cat > .claude/workflow.md <<'EOP'
+---
+project: Product Factory
+project_status_field: Status
+project_phase_field: Phase
+project_status: "planning=Planning/Running, defined=Building/Ready, input=Waiting for Input, running=Building/Running, implemented=Building/Complete, review=Review/Ready, shipping=Review/Running, failed=Failed, blocked=Blocked, approval=Review/Waiting for Approval, done=Done/Complete"
+autopilot_queue: project
+autopilot_assignee: boris
+autopilot_finish: on
+auto_merge: auto
+---
+EOP
+printf '.claude/worktrees/\n' > .gitignore
+mkdir -p src && echo 'x' > src/a.ts && echo 'test("a", () => {})' > src/a.test.ts
+git add -A; git commit -qm init; git push -q -u origin main
+stub projects "$(printf '2\tProduct Factory\thttps://github.com/orgs/acme/projects/2')"
+stub issues ""; stub prlist ""; nostub prview; nostub agents; : > "$STUB_LOG"; : > "$CLAUDE_LOG"
+"$FR" project-status 47 defined > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: Phase/Status writes the status, then the phase" '[ "$rc" = 0 ] && grep -qx "project item-edit 2 --owner acme --url https://github.com/acme/m8/issues/47 --field Status --value Ready" "$STUB_LOG" && grep -qx "project item-edit 2 --owner acme --url https://github.com/acme/m8/issues/47 --field Phase --value Building" "$STUB_LOG" && grep -q "acme/m8#47 → Building / Ready (Product Factory)" "$SP/ps.out"' "exit $rc: $(cat "$SP/ps.out" "$STUB_LOG")"
+: > "$STUB_LOG"
+"$FR" project-status 47 input > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: a status alone leaves the phase as it is" '[ "$rc" = 0 ] && [ "$(grep -c "^project item-edit" "$STUB_LOG")" = 1 ] && grep -q -- "--field Status --value Waiting for Input" "$STUB_LOG" && ! grep -q -- "--field Phase" "$STUB_LOG"' "exit $rc: $(cat "$SP/ps.out" "$STUB_LOG")"
+for e in planning review shipping; do "$FR" project-status 47 $e > "$SP/ps.out" 2>&1 || { echo "FAIL  project-status: event $e — $(cat "$SP/ps.out")"; fail=$((fail + 1)); }; done
+check "project-status: planning, review and shipping are events" 'grep -q "acme/m8#47 → Review / Running" "$SP/ps.out"' "$(cat "$SP/ps.out")"
+sub '/^project_phase_field:/d' .claude/workflow.md
+"$FR" project-status 47 defined > "$SP/ps.out" 2>&1; rc=$?
+check "project-status: Phase/Status without project_phase_field → exit 5, nothing written" '[ "$rc" = 5 ] && grep -q "no project_phase_field" "$SP/ps.out" && ! grep -q "Building" "$STUB_LOG"' "exit $rc: $(cat "$SP/ps.out")"
+git checkout -q .claude/workflow.md
+
+# queue sync: the board's Building / Ready square, this repo's open FR issues, the assignee
+stub items "$(printf '80\tacme/m8\tOPEN\tfr\tReady\tBuilding\tboris\n81\tacme/m8\tOPEN\tfr\tReady\tBuilding\tflorian\n82\tacme/m8\tOPEN\tfr\tReady\tPlanning\tboris\n83\tacme/m8\tOPEN\tfr-request\tReady\tBuilding\tboris\n84\tacme/other\tOPEN\tfr\tReady\tBuilding\tboris\n85\tacme/m8\tCLOSED\tfr\tReady\tBuilding\tboris\n86\tacme/m8\tOPEN\tfr,bug\tready\tbuilding\tBoris,florian\n87\tacme/m8\tOPEN\tfr\tReady\tBuilding\t-\n88\tacme/m8\tOPEN\tfr\tReady\tBuilding\tboris')"
+fm FR-88 Eighty-eight in-review "" "src/z" > req/feature-requests/FR-88-eighty-eight.md
+git add -A; git commit -qm "FR-88 merged"; git push -q origin main
+: > "$STUB_LOG"
+"$FR" queue sync > "$SP/q.out" 2>&1; rc=$?
+check "queue sync: takes the open FR issues of this repo on Building / Ready assigned to boris, not merged ones" '[ "$rc" = 0 ] && [ "$("$FR" queue list | paste -sd " " -)" = "FR-80 FR-86" ] && grep -q "added from the board — FR-80, FR-86" "$SP/q.out"' "exit $rc: $(cat "$SP/q.out"; "$FR" queue list)"
+check "queue sync: asks the board with the project number and the status and phase fields" 'grep -q "^api graphql --paginate -f query=.*projectV2(number: 2).*fieldValueByName(name: \"Status\").*fieldValueByName(name: \"Phase\")" "$STUB_LOG"' "$(cat "$STUB_LOG")"
+check "queue sync: logs where the FR came from" 'grep -q " queued board boris$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-80.log"' "$(cat "$(git rev-parse --git-common-dir)/fr-workflow/FR-80.log" 2>&1)"
+# the per-machine profile: autopilot_assignee beside the committed profile wins; other keys there are ignored
+had_gitignore=0; [ ! -e .gitignore ] || had_gitignore=1
+printf -- '---\nautopilot_assignee: florian\nauto_merge: off\n---\n' > .claude/workflow.local.md
+"$FR" queue sync > "$SP/q.out" 2>&1
+check "local profile: autopilot_assignee in .claude/workflow.local.md overrides the profile's" 'grep -q "added from the board — FR-81" "$SP/q.out" && grep -q " queued board florian$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-81.log"' "$(cat "$SP/q.out")"
+"$FR" check > "$SP/c.out" 2>&1 || true
+check "check: names the local profile, its per-machine keys, the ignored others and the missing .gitignore entry" 'grep -q "^local:    .claude/workflow.local.md — autopilot_assignee=florian   not per-machine keys, ignored: auto_merge$" "$SP/c.out" && grep -q "NOT ignored by git" "$SP/c.out"' "$(cat "$SP/c.out")"
+echo ".claude/workflow.local.md" >> .gitignore
+"$FR" check > "$SP/c.out" 2>&1 || true
+check "check: an ignored local profile gets no warning" '! grep -q "NOT ignored" "$SP/c.out"' "$(cat "$SP/c.out")"
+rm .claude/workflow.local.md; [ "$had_gitignore" = 1 ] || rm .gitignore
+"$FR" queue rm FR-81 > /dev/null
+"$FR" queue sync > "$SP/q.out" 2>&1
+check "queue sync: a second run adds nothing" 'grep -q "nothing new on the board" "$SP/q.out"' "$(cat "$SP/q.out")"
+sub 's/^autopilot_assignee: boris/autopilot_assignee: none/' .claude/workflow.md
+"$FR" queue sync > "$SP/q.out" 2>&1
+check "queue sync: autopilot_assignee none takes the unassigned FR" 'grep -q "added from the board — FR-87" "$SP/q.out"' "$(cat "$SP/q.out")"
+sub '/^autopilot_assignee:/d' .claude/workflow.md
+"$FR" queue sync > "$SP/q.out" 2>&1
+check "queue sync: without autopilot_assignee every assignment counts" 'grep -q "added from the board — FR-81" "$SP/q.out"' "$(cat "$SP/q.out")"
+git checkout -q .claude/workflow.md
+stub items-fails ""
+"$FR" queue sync > "$SP/q.out" 2>&1; rc=$?
+check "queue sync: an unreadable board is reported, exit 0, the queue stays" '[ "$rc" = 0 ] && grep -q "board not read" "$SP/q.out" && "$FR" queue list | grep -qx "FR-80"' "exit $rc: $(cat "$SP/q.out")"
+nostub items-fails
+sub 's/^autopilot_queue: project/autopilot_queue: manual/' .claude/workflow.md
+"$FR" queue sync > "$SP/q.out" 2>&1; rc=$?
+check "queue sync: manual queue → says so, exit 0" '[ "$rc" = 0 ] && grep -q "autopilot_queue is manual" "$SP/q.out"' "exit $rc: $(cat "$SP/q.out")"
+git checkout -q .claude/workflow.md
+"$FR" queue clear; : > "$STUB_LOG"
+"$FR" pipeline --no-fetch > "$SP/p.out" 2>&1
+check "pipeline: with autopilot_queue project it syncs the queue from the board first" 'grep -q "^api graphql --paginate" "$STUB_LOG" && grep -q "^FR-80	" "$SP/p.out"' "$(cat "$SP/p.out" "$STUB_LOG")"
+"$FR" queue clear
+
+# merge-gate: an FR in review on its branch with a clean PR and a recorded acceptance check
+git switch -q -c feat/fr-90-m origin/main
+{ fm FR-90 Ninety in-review "" "src/m"; printf '\n## Acceptance check\n\n2026-11-07, PR #5 at abc1234\n\n- the field shows — passed\n'; } > req/feature-requests/FR-90-m.md
+echo 'test("m", () => {})' > src/m.test.ts; echo 'm' > src/m.ts
+git add -A; git commit -qm "feat: m (FR-90)"; git push -q -u origin HEAD 2>/dev/null; git switch -q main
+stub prlist "5"; stub prtitle "$(printf 'feat: m (FR-90)\nCloses #90')"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tCLEAN\t-\ncheck\tbuild\tpass\ncheck\tlint\tpending')"
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: in review, PR open and clean, acceptance recorded, tests intact → ok" '[ "$rc" = 0 ] && grep -q "^merge-gate: FR-90 PR #5 ok — 1 checks green, 1 pending" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tCLEAN\t-\ncheck\tbuild\tfail\ncheck\tcodeql\tfail')"
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: red checks → exit 4, named" '[ "$rc" = 4 ] && grep -q "red checks on PR #5: build, codeql" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+stub prview "$(printf 'pr\tOPEN\tCONFLICTING\tDIRTY\t-')"
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: a conflicting PR → exit 4" '[ "$rc" = 4 ] && grep -q "conflicts with the base branch" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+stub prview "$(printf 'pr\tMERGED\tUNKNOWN\tUNKNOWN\t-')"
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: a PR that is not open → exit 4" '[ "$rc" = 4 ] && grep -q "PR #5 is MERGED, not open" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tCLEAN\t-\ncheck\tbuild\tpass')"
+stub prtitle "$(printf 'feat: m [skip ci]\nbody')"
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: a CI skip marker in the PR title → exit 4" '[ "$rc" = 4 ] && grep -q "CI skip marker in the PR title or body" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+stub prtitle "$(printf 'feat: m (FR-90)\nCloses #90')"
+"$FR" project-status 90 failed ci >/dev/null 2>&1
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: the log's last event is a stopped gate → exit 4" '[ "$rc" = 4 ] && grep -q "last event is failed ci" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+"$FR" project-status 90 shipping >/dev/null 2>&1
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: shipping after the stop passes again" '[ "$rc" = 0 ]' "exit $rc: $(cat "$SP/mg.out")"
+git switch -q feat/fr-90-m
+printf -- '- the button — unverified\n' >> req/feature-requests/FR-90-m.md; git commit -qam "docs(fr): unverified"; git push -q origin HEAD 2>/dev/null
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: an unverified criterion nobody accepted → exit 4" '[ "$rc" = 4 ] && grep -q "unverified criterion nobody accepted: - the button — unverified" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+sub 's/^- the button — unverified$/- the button — unverified, accepted by boris/' req/feature-requests/FR-90-m.md; git commit -qam "docs(fr): accepted"; git push -q origin HEAD 2>/dev/null
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: unverified but accepted by the user passes" '[ "$rc" = 0 ]' "exit $rc: $(cat "$SP/mg.out")"
+printf -- '- the link — failed: 404\n' >> req/feature-requests/FR-90-m.md; git commit -qam "docs(fr): failed"; git push -q origin HEAD 2>/dev/null
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: a failed criterion in the acceptance check → exit 4" '[ "$rc" = 4 ] && grep -q "records a failure: - the link — failed: 404" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+git reset -q --hard HEAD~1; git push -q -f origin HEAD 2>/dev/null
+echo 'test.only("m", () => {})' > src/m.test.ts; git commit -qam "test: focus"; git push -q origin HEAD 2>/dev/null
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: a focused test added on the branch → exit 4" '[ "$rc" = 4 ] && grep -q "focused or skipped test added on the branch: src/m.test.ts: test.only" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+git reset -q --hard HEAD~1; git push -q -f origin HEAD 2>/dev/null
+echo 'const n = items.skip(2)' > src/m.ts; git commit -qam "feat: skip in source"; git push -q origin HEAD 2>/dev/null
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: .skip( outside a test file is no marker" '[ "$rc" = 0 ]' "exit $rc: $(cat "$SP/mg.out")"
+git rm -q src/a.test.ts; git commit -qm "test: drop a"; git push -q origin HEAD 2>/dev/null
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: a test file deleted on the branch → exit 4" '[ "$rc" = 4 ] && grep -q "test files deleted on the branch: src/a.test.ts" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+git reset -q --hard HEAD~1; git push -q -f origin HEAD 2>/dev/null
+git commit -q --allow-empty -m "chore: tidy [ci skip]"; git push -q origin HEAD 2>/dev/null
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: a CI skip marker in a commit message → exit 4" '[ "$rc" = 4 ] && grep -q "CI skip marker in a commit message" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+git reset -q --hard HEAD~1; git push -q -f origin HEAD 2>/dev/null; git switch -q main
+stub prlist ""
+"$FR" merge-gate FR-90 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: no open PR → exit 4" '[ "$rc" = 4 ] && grep -q "no open PR of this repository" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+stub prlist "5"
+"$FR" merge-gate FR-88 --no-fetch > "$SP/mg.out" 2>&1; rc=$?
+check "merge-gate: an FR not on its branch → exit 4" '[ "$rc" = 4 ] && grep -q "not in-review\|not on its FR branch" "$SP/mg.out"' "exit $rc: $(cat "$SP/mg.out")"
+
+# merge: the gate, then gh pr merge --auto — GitHub decides
+: > "$STUB_LOG"
+"$FR" merge FR-90 > "$SP/m.out" 2>&1; rc=$?
+check "merge: after the gate, gh pr merge --auto --squash, logged" '[ "$rc" = 0 ] && grep -qx "pr merge 5 -R acme/m8 --auto --squash" "$STUB_LOG" && grep -q " merge auto 5$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-90.log" && grep -q "handed to GitHub (squash)" "$SP/m.out"' "exit $rc: $(cat "$SP/m.out" "$STUB_LOG")"
+printf 'merge_method: merge\n' >> .claude/workflow.md; sub '/^---$/{x;s/^/x/;/^xx$/{x;d;};x;}' .claude/workflow.md 2>/dev/null || true
+git checkout -q .claude/workflow.md; sub 's/^auto_merge: auto/auto_merge: auto\nmerge_method: merge/' .claude/workflow.md
+: > "$STUB_LOG"
+"$FR" merge FR-90 > "$SP/m.out" 2>&1; rc=$?
+check "merge: merge_method is passed through" '[ "$rc" = 0 ] && grep -qx "pr merge 5 -R acme/m8 --auto --merge" "$STUB_LOG"' "exit $rc: $(cat "$SP/m.out" "$STUB_LOG")"
+git checkout -q .claude/workflow.md
+stub merge-fails ""
+"$FR" merge FR-90 > "$SP/m.out" 2>&1; rc=$?
+check "merge: GitHub refuses → exit 4 with its reason, logged as refused" '[ "$rc" = 4 ] && grep -q "did not take the merge request for PR #5 — GraphQL" "$SP/m.out" && grep -q " merge refused 5$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-90.log"' "exit $rc: $(cat "$SP/m.out")"
+nostub merge-fails
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tCLEAN\t-\ncheck\tbuild\tfail')"
+: > "$STUB_LOG"
+"$FR" merge FR-90 > "$SP/m.out" 2>&1; rc=$?
+check "merge: a red gate asks GitHub nothing" '[ "$rc" = 4 ] && ! grep -q "^pr merge" "$STUB_LOG" && grep -q "red checks" "$SP/m.out"' "exit $rc: $(cat "$SP/m.out")"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tCLEAN\t-\ncheck\tbuild\tpass')"
+sub 's/^auto_merge: auto/auto_merge: off/' .claude/workflow.md
+"$FR" merge FR-90 > "$SP/m.out" 2>&1; rc=$?
+check "merge: auto_merge off → exit 4, the merge is the user's, GitHub not asked" '[ "$rc" = 4 ] && grep -q "auto_merge is off" "$SP/m.out" && ! grep -q "^pr merge" "$STUB_LOG"' "exit $rc: $(cat "$SP/m.out")"
+git checkout -q .claude/workflow.md
+
+# pipeline: a PR with auto-merge enabled is merging, not waiting for the user
+"$FR" queue add FR-90 >/dev/null
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\tauto\ncheck\tbuild\tpending')"
+check "pipeline: auto-merge enabled → merging, no report" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-90	merging	none	PR #5: auto-merge enabled"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tCLEAN\t-\ncheck\tbuild\tpass')"
+check "pipeline: without auto-merge the PR waits for the user" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-90	review	none	PR #5 waits for your merge"' "$("$FR" pipeline --no-fetch 2>&1)"
+"$FR" queue clear
+
+# finish: after the merge — hook, worktree, local branch, board, queue
+git switch -q -c feat/fr-91-x origin/main
+fm FR-91 Ninety-one in-review "" "src/x" > req/feature-requests/FR-91-x.md
+git add -A; git commit -qm "feat: x (FR-91)"; git push -q -u origin HEAD 2>/dev/null; git switch -q main
+git merge -q --no-ff feat/fr-91-x -m "merge FR-91" 2>/dev/null; git push -q origin main
+git worktree add -q .claude/worktrees/fr-91-x feat/fr-91-x 2>/dev/null
+"$FR" queue add FR-91 >/dev/null
+check "pipeline: a merged FR with autopilot_finish on → finish" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-91	merged	finish	$"' "$("$FR" pipeline --no-fetch 2>&1)"
+sub 's/^autopilot_finish: on/autopilot_finish: off/' .claude/workflow.md
+check "pipeline: autopilot_finish off → merged FRs need nothing" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-91	merged	none	$"' "$("$FR" pipeline --no-fetch 2>&1)"
+git checkout -q .claude/workflow.md
+echo dirty > .claude/worktrees/fr-91-x/src/x.ts
+"$FR" finish FR-91 > "$SP/f.out" 2>&1; rc=$?
+check "finish: uncommitted changes in the worktree → exit 3, worktree kept, logged" '[ "$rc" = 3 ] && [ -d .claude/worktrees/fr-91-x ] && grep -q " finish worktree not removed" "$(git rev-parse --git-common-dir)/fr-workflow/FR-91.log"' "exit $rc: $(cat "$SP/f.out")"
+check "pipeline: a failed finish is reported, not retried" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-91	merged	report	finish failed: worktree not removed"' "$("$FR" pipeline --no-fetch 2>&1)"
+rm .claude/worktrees/fr-91-x/src/x.ts
+sub 's/^autopilot_finish: on/worktree_teardown: exit 7/' .claude/workflow.md
+"$FR" finish FR-91 > "$SP/f.out" 2>&1; rc=$?
+check "finish: a failing teardown hook → exit 3, blocked teardown on the board, worktree kept" '[ "$rc" = 3 ] && [ -d .claude/worktrees/fr-91-x ] && grep -q "worktree_teardown failed" "$SP/f.out" && grep -q -- "--value Blocked" "$STUB_LOG"' "exit $rc: $(cat "$SP/f.out")"
+git checkout -q .claude/workflow.md
+{ sleep 300 & } 2>/dev/null; echo $! > "$STUB/session91.pid"; disown $!
+git worktree lock --reason "claude session (pid $(cat "$STUB/session91.pid"))" .claude/worktrees/fr-91-x
+"$FR" finish FR-91 > "$SP/f.out" 2>&1; rc=$?
+check "finish: a live session that is not the autopilot's holds the worktree → exit 3" '[ "$rc" = 3 ] && grep -q "a session still holds" "$SP/f.out" && [ -d .claude/worktrees/fr-91-x ]' "exit $rc: $(cat "$SP/f.out")"
+kill "$(cat "$STUB/session91.pid")" 2>/dev/null; git worktree unlock .claude/worktrees/fr-91-x
+: > "$STUB_LOG"
+"$FR" finish FR-91 > "$SP/f.out" 2>&1; rc=$?
+check "finish: worktree removed, local branch deleted, board done, out of the queue" '[ "$rc" = 0 ] && [ ! -d .claude/worktrees/fr-91-x ] && ! git show-ref --verify --quiet refs/heads/feat/fr-91-x && grep -q -- "--field Phase --value Done" "$STUB_LOG" && ! "$FR" queue list | grep -q FR-91 && grep -q " event done$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-91.log" && grep -q "^finished FR-91" "$SP/f.out"' "exit $rc: $(cat "$SP/f.out" "$STUB_LOG")"
+"$FR" finish FR-90 > "$SP/f.out" 2>&1; rc=$?
+check "finish: an FR that is not merged → exit 4" '[ "$rc" = 4 ] && grep -q "is in-review, not merged" "$SP/f.out"' "exit $rc: $(cat "$SP/f.out")"
+# finish after a squash merge with GitHub's delete-branch-on-merge: git's -d
+# refuses once origin/<branch> is gone; the merged PR's head decides instead
+nostub prlist
+git switch -q -c feat/fr-92-x origin/main
+fm FR-92 Ninety-two in-review "" "src/x" | awk 'NR == 2 { print; print "pr: 92"; next } 1' > req/feature-requests/FR-92-x.md
+git add -A; git commit -qm "feat: x (FR-92)"; git push -q -u origin HEAD 2>/dev/null; git switch -q main
+git merge -q --squash feat/fr-92-x >/dev/null 2>&1; git commit -qm "feat: x (FR-92) (#92)"; git push -q origin main
+git push -q origin --delete feat/fr-92-x 2>/dev/null
+git worktree add -q .claude/worktrees/fr-92-x feat/fr-92-x 2>/dev/null
+stub prhead "$(git rev-parse feat/fr-92-x)"
+: > "$STUB_LOG"
+"$FR" finish FR-92 > "$SP/f.out" 2>&1; rc=$?
+check "finish: squash merge, remote branch gone, tip = the merged PR's head → -D" '[ "$rc" = 0 ] && ! git show-ref --verify --quiet refs/heads/feat/fr-92-x && [ ! -d .claude/worktrees/fr-92-x ] && grep -q "head of the merged PR #92" "$SP/f.out" && grep -q "pr view 92 .*--json state,headRefOid" "$STUB_LOG"' "exit $rc: $(cat "$SP/f.out")"
+git switch -q -c feat/fr-93-x origin/main
+fm FR-93 Ninety-three in-review "" "src/x" | awk 'NR == 2 { print; print "pr: 93"; next } 1' > req/feature-requests/FR-93-x.md
+git add -A; git commit -qm "feat: x (FR-93)"; git push -q -u origin HEAD 2>/dev/null; git switch -q main
+git merge -q --squash feat/fr-93-x >/dev/null 2>&1; git commit -qm "feat: x (FR-93) (#93)"; git push -q origin main
+git push -q origin --delete feat/fr-93-x 2>/dev/null
+stub prhead "$(git rev-parse feat/fr-93-x)"
+git worktree add -q .claude/worktrees/fr-93-x feat/fr-93-x 2>/dev/null
+echo more > .claude/worktrees/fr-93-x/more.txt; git -C .claude/worktrees/fr-93-x add more.txt; git -C .claude/worktrees/fr-93-x commit -qm "more"
+"$FR" finish FR-93 > "$SP/f.out" 2>&1; rc=$?
+check "finish: a local commit beyond the merged PR's head → branch kept, worktree still removed" '[ "$rc" = 0 ] && git show-ref --verify --quiet refs/heads/feat/fr-93-x && [ ! -d .claude/worktrees/fr-93-x ] && grep -q "^branch feat/fr-93-x kept" "$SP/f.out"' "exit $rc: $(cat "$SP/f.out")"
+stub prhead ""
+"$FR" finish FR-93 > "$SP/f.out" 2>&1; rc=$?
+check "finish: GitHub does not call the PR merged → the branch is kept" '[ "$rc" = 0 ] && git show-ref --verify --quiet refs/heads/feat/fr-93-x && grep -q "^branch feat/fr-93-x kept" "$SP/f.out"' "exit $rc: $(cat "$SP/f.out")"
 
 echo "--- $pass passed, $fail failed"
 [ "$fail" = 0 ]

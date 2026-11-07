@@ -37,7 +37,13 @@ pitfalls that the code does not show.
   column values; `fr.sh project-status` writes them best effort (exit 5 = not
   written) with gh's name-based `item-edit` (gh ≥ 2.97; the node-id form needs
   three lookups more), no skill ever stops for the board, and without the key
-  nothing is written.
+  nothing is written. A board with a **phase** column (0.8, Florian's Product
+  Factory: Backlog → Planning → Building → Review → Done, the status inside the
+  phase, a hand-off sets the next phase's *Ready*) gets `project_phase_field`
+  and `Phase/Status` values; `input`, `failed`, `blocked` carry no phase on
+  purpose, a card keeps its phase when it stops. Three events came with it —
+  `planning` (`new`), `review` (`launch ship`), `shipping` (`ship`) — so each
+  phase change has an event.
 - What the skills write to GitHub is in the language of its source — the idea,
   the file, the request — never switched to English (0.5.1); the plugin's own
   files stay English.
@@ -138,7 +144,40 @@ pitfalls that the code does not show.
 - Playwright MCP stays on `@latest` — maintained by Microsoft; accepted trade-off.
 - Jira is not implemented — FRs are GitHub issues. When needed, via Atlassian's
   official MCP server, not own code.
-- The plugin never merges, never triggers deployments, never touches production.
+- **Merge** (0.8) reopens "the plugin never merges" with the reason that an
+  autonomous factory needs one: not by own judgement. `auto_merge: auto` lets
+  the ship session run `fr.sh merge` — a deterministic `merge-gate` (in
+  review, open non-conflicting PR without red checks, no stopped gate in the
+  log, acceptance recorded with nothing failed or unaccepted, no test file
+  deleted, no focused or skipped test added, no CI skip marker), then
+  `gh pr merge --auto`. GitHub's ruleset decides; `--admin` never. The
+  autopilot never merges, the queue may come from the board
+  (`autopilot_queue: project`, `autopilot_assignee` divides one repository
+  between several autopilots), and `fr.sh finish` cleans up after the merge
+  (`autopilot_finish`). Deployments and production stay untouched.
+- **Per-machine profile** (0.8): `.claude/workflow.local.md`, ignored by git,
+  for the five keys that describe the machine (`LOCAL_KEYS` in `fr.sh`:
+  `autopilot_assignee`, `notify_command`, `session_permission_mode`,
+  `autopilot_model`, `autopilot_effort`) — two containers cloning one
+  repository would otherwise serve the same login. Nothing else is read from
+  it: what the project decides stays committed. Read where `fr.sh` runs, so
+  the main checkout; FR worktrees never have it.
+- **Container** (0.8): `docker/` holds a generic image — Playwright base image
+  (Chromium, Xvfb, `pwuser`), Claude Code pinned via npm, gh from its release
+  package — and an entrypoint that prepares a clone and keeps `fr.sh launch
+  autopilot` alive. Nothing project-specific in it; a project builds `FROM`
+  it. `.github/workflows/image.yml` publishes it to GHCR as
+  `ghcr.io/bmoers/fr-workflow-autopilot:<tag>` on every release tag (arm64 and
+  amd64, actions pinned to commits, `GITHUB_TOKEN` only, no `latest`: client
+  machines pin the image like the plugin); pull requests build without
+  publishing. The entrypoint writes the container's user settings once with
+  `autoMode` context and an `allow` entry for `fr.sh merge`, because the
+  auto-mode classifier refuses "merging a pull request no human has approved"
+  and reads `autoMode` only from user settings. Tokens only from the
+  environment. `docker exec` lands in `~/work`, trusted by the entrypoint:
+  quitting a `claude attach` from an untrusted directory ended the autopilot
+  in the first run. A registered marketplace keeps its `ref`: a pin raise
+  means a fresh volume (documented), until the entrypoint compares refs.
 
 ## Code conventions
 
@@ -205,6 +244,12 @@ pitfalls that the code does not show.
   overrides every pin: never.
 - The auto-mode classifier refuses to create GitHub repositories and to merge
   PRs: the maintainer does those, in the sandbox too.
+- **Container:** `docker build -t fr-workflow-autopilot:dev docker/`, then the
+  smoke test against the sandbox with the working copy as the marketplace
+  (`-v "$PWD":/mnt/claude-fr-workflow:ro -e MARKETPLACE=/mnt/claude-fr-workflow`,
+  command `check`) — see [docs/container.md](docs/container.md). Tokens from an
+  env file outside the repository; the sandbox profile needs
+  `.claude/workflow.local.md` in its `.gitignore`.
 - After a test, reset the sandbox: delete FR branches (remote and local), close
   test issues as *not planned*; keep its setup.
 
@@ -229,7 +274,11 @@ a new session there.
   opt-in fix loop · 0.7.0 deployment signal (`deploy_signal: deployment`,
   `acceptance_label`), `notify_command`, spec model (`spec_dir`, spec deltas,
   `fr.sh validate|fingerprint|fold`) · 0.7.1 comment trust by collaborator
-  permission. Details:
+  permission · 0.8.0 phases on the board (`project_phase_field`, events
+  `planning`, `review`, `shipping`), the queue from the board
+  (`autopilot_queue`, `autopilot_assignee`), `fr.sh merge-gate|merge`
+  (`auto_merge`), `fr.sh finish` (`autopilot_finish`), the per-machine profile
+  (`.claude/workflow.local.md`), the container (`docker/`). Details:
   [CHANGELOG.md](CHANGELOG.md).
 - Before 0.3.0, three `/code-review` rounds found 37, 23 and 19 issues. Recurring
   bug classes: `set -e` exit codes, git path quoting, ref normalization, branch

@@ -14,7 +14,9 @@
   writes it into an FR document on the FR's branch. From then on that document is
   the source, and a fresh Claude session builds from it.
 - Finishing an FR runs through **gates** — review, CI, test deployment,
-  acceptance check. Any gate that fails stops and asks you. **A human merges.**
+  acceptance check. Any gate that fails stops and asks you. **A human merges** —
+  or GitHub does, when the profile says `auto_merge: auto` and a deterministic
+  merge gate passed.
 
 ```mermaid
 flowchart LR
@@ -186,7 +188,9 @@ you accept them, and the FR document says so.
 ## Step 4 — Merge: you
 
 Review the PR as usual; the FR document is part of it and shows what was
-accepted. Merge it — squash is fine. The plugin never merges. GitHub closes the
+accepted. Merge it — squash is fine. The plugin never merges by itself; with
+`auto_merge: auto` it asks GitHub after its merge gate and the base branch's
+rules decide. GitHub closes the
 FR's issue with the merge (`Closes #20`).
 
 ## Step 5 — Close: `/fr-workflow:done #20`
@@ -252,14 +256,14 @@ flowchart TD
 | implementation session   | you open it (`claude -w …`) | started for you, in the background     | started for you                                                                                                                 |
 | ship session             | you open it                 | you open it, per FR                    | started for you once the implementation reports `implemented`                                                                   |
 | a gate stops             | you decide                  | you decide                             | reported to you — with `fix_loop`, red checks and trusted review comments go to a fresh fix session first, then a full new ship |
-| merge                    | you                         | you                                    | you                                                                                                                             |
-| next wave                | `start` again               | `start` again                          | starts itself after your merge                                                                                                  |
-| done (teardown, cleanup) | you                         | you                                    | you                                                                                                                             |
+| merge                    | you                         | you                                    | you — or GitHub, with `auto_merge: auto` after the ship session's merge gate                                                    |
+| next wave                | `start` again               | `start` again                          | starts itself after the merge                                                                                                   |
+| done (teardown, cleanup) | you                         | you                                    | you — or the autopilot's `finish`, with `autopilot_finish: on`; issues and requests stay with `done`                           |
 
 Pick by hand for one FR you want to watch, or when the FR is delicate. Pick
 parallel when a few independent FRs are ready and you will be around for the
 hand-offs. Pick the autopilot for a queue you want to come back to — it never
-merges, never answers a session's question for you, and every stopped gate
+merges itself, never answers a session's question for you, and every stopped gate
 outside the fix loop waits for you.
 
 ## Working in parallel
@@ -319,7 +323,9 @@ in the issue's *Planning* before starting.
 
 Parallel sessions still need you at every hand-off: open the ship session when
 an implementation is done, start the next wave when a merge cleared the way. The
-autopilot takes those hand-offs over. You keep the merge.
+autopilot takes those hand-offs over. You keep the merge — or hand it to GitHub
+with `auto_merge: auto`. Without a terminal to start it from — a closed laptop,
+a server — the autopilot runs in a [container](container.md).
 
 ```
 /fr-workflow:autopilot #20 #21 #22 #23
@@ -464,7 +470,8 @@ That is intended — the commit that gets merged must have green checks.
 
 ## What the plugin never does
 
-- merge a PR;
+- merge a PR by its own judgement — with `auto_merge: auto` the ship session
+  asks GitHub after a deterministic gate, and the base branch's rules decide;
 - fix what one of its own gates found — only the autopilot's opt-in fix loop
   does, in a fresh session, followed by a full new ship;
 - start or re-run a deployment;

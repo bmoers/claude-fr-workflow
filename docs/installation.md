@@ -38,7 +38,7 @@ whatever other plugins and skills they use.
    {
      "extraKnownMarketplaces": {
        "claude-fr-workflow": {
-         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.7.1" }
+         "source": { "source": "github", "repo": "bmoers/claude-fr-workflow", "ref": "v0.8.0" }
        }
      },
      "enabledPlugins": { "fr-workflow@claude-fr-workflow": true }
@@ -103,7 +103,7 @@ Repositories pin a version, so nobody gets changes by surprise.
 
    ```
    claude plugin marketplace remove claude-fr-workflow --scope user
-   claude plugin marketplace add 'bmoers/claude-fr-workflow#v0.7.1'
+   claude plugin marketplace add 'bmoers/claude-fr-workflow#v0.8.0'
    cd <repository>
    claude plugin install fr-workflow@claude-fr-workflow -s project
    claude plugin list                                        # Version: the new tag, Scope: project
@@ -132,6 +132,9 @@ claude -p "/fr-workflow:status" --plugin-dir ~/.claude/plugins/marketplaces/clau
 Background sessions started by `/fr-workflow:start` are regular interactive
 sessions. If `/fr-workflow:ship` is unknown after `claude attach`, start it from a
 new session in the FR's worktree (`claude -w <worktree name>`).
+
+To run the autopilot without any terminal — on a laptop that may be closed, or
+on a server — see [the container](container.md).
 
 ## Opting out — one developer
 

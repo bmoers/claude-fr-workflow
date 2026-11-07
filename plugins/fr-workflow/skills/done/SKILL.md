@@ -78,7 +78,9 @@ by `drop`.
    Comments are read by the customer: no internals, no personal data, and in
    the issue's language — the texts above are templates (*Language* in the
    model).
-2. Clean up, each step only if it is safe:
+2. Clean up, each step only if it is safe — the autopilot's `fr.sh finish`
+   (`autopilot_finish: on`) may have done this part already; then the worktree
+   and the local branch are gone and only the issues remain:
    - A Claude session still running in the FR's worktree? Check
      `claude agents --json` (match `cwd` to the worktree path, or `name` starting
      with `<ID> `). Running → stop here and name it; the user ends it
@@ -105,8 +107,11 @@ by `drop`.
      not count; generated files that are not ignored do — the teardown hook is
      where they are removed.
    - `git branch -d <branch>` **before** deleting the remote branch — while
-     `origin/<branch>` still exists, git accepts `-d` after a squash merge. It
-     refuses after a drop, or once the remote branch is gone: ask before `-D`.
+     `origin/<branch>` still exists, git accepts `-d` after a squash merge. Once
+     the remote branch is gone (*Delete branch on merge*) it refuses: `-D` is
+     safe without asking when the branch tip equals the merged PR's head
+     (`gh pr view <N> --json headRefOid`) — every commit is in what GitHub
+     merged. Any other case, and after a drop: ask before `-D`.
      After a drop, first show `git log origin/<branch>..<branch> --oneline`: those
      local commits are lost with `-D`.
    - Remote branch after a merge: nothing if GitHub deleted it; otherwise offer

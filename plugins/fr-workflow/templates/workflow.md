@@ -6,7 +6,8 @@ branch_pattern: "{type}/{id-lower}-{slug}"
 issue_repo:                       # owner/repo of requests and FR issues; empty = this repository
 project:                          # GitHub project (title) for the FR issues; empty = none
 project_status_field: Status      # the project's single-select status column
-project_status:                   # plugin events -> its values, e.g. "defined=Ready, running=In progress, approval=In review, done=Done"; empty = GitHub's workflows move the cards
+project_phase_field:              # the project's phase column (Backlog, Planning, Building, Review, Done), if it has one; project_status values are then Phase/Status
+project_status:                   # plugin events -> its values, e.g. "defined=Ready, running=In progress, approval=In review, done=Done" or "defined=Building/Ready, …"; empty = GitHub's workflows move the cards
 notify_issues: ask                # never | ask | always — "ready for acceptance" comment
 review_gate: stop                 # stop | report — what :ship does on code review findings
 security_gate: stop               # stop | report — what :ship does on security review findings
@@ -39,6 +40,11 @@ fix_loop: off                     # off | checks | checks+comments — what the 
 fix_attempts: 2                   # fix sessions per FR, then it is reported
 fix_skip_checks: []               # checks that never go to the fix loop, e.g. [CodeQL, gitleaks]
 fix_comment_bots: []              # bots whose PR comments count for checks+comments, e.g. [claude[bot]]
+autopilot_queue: manual           # manual | project — the board feeds the queue: open FR issues on the `defined` square
+autopilot_assignee:               # project queue: a login (that person's FRs), none (unassigned FRs), empty = any — per machine: set it in .claude/workflow.local.md
+autopilot_finish: off             # on = after the merge: worktree hook, worktree, local branch, board done, out of the queue
+auto_merge: off                   # auto = after the acceptance check: fr.sh merge-gate, then gh pr merge --auto — GitHub's rules decide
+merge_method: squash              # squash | merge | rebase, for fr.sh merge
 ---
 
 # Workflow profile

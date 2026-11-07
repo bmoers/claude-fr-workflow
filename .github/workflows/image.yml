@@ -1,0 +1,71 @@
+# Builds the autopilot container image (docker/) and publishes it to GHCR as
+# ghcr.io/bmoers/fr-workflow-autopilot:<tag> on every release tag. Pull
+# requests and pushes that touch docker/ build it without publishing. The
+# repository is public: the image carries no secrets (tokens arrive at
+# runtime), only GITHUB_TOKEN is used, every action is pinned to a commit,
+# and a pull request from a fork never gets package write permission.
+name: image
+
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths: ['docker/**', '.github/workflows/image.yml']
+  pull_request:
+    paths: ['docker/**', '.github/workflows/image.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/fr-workflow-autopilot
+      PUBLISH: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # the smoke test runs the native build only; the multi-arch build is pushed
+      - name: Build for this runner and run the entrypoint's own checks
+        run: |
+          docker build -t fr-workflow-autopilot:ci docker/
+          docker run --rm fr-workflow-autopilot:ci check 2>&1 | tee check.out || true
+          grep -q 'REPO is not set' check.out
+          docker run --rm --entrypoint claude fr-workflow-autopilot:ci --version
+          docker run --rm --entrypoint gh fr-workflow-autopilot:ci --version
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        if: env.PUBLISH == 'true'
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: env.PUBLISH == 'true'
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        if: env.PUBLISH == 'true'
+        with:
+          images: ${{ env.IMAGE }}
+          # the release tag as it is (v0.8.0) and the commit — never a moving `latest`:
+          # client machines pin, like the plugin itself
+          tags: |
+            type=ref,event=tag
+            type=sha,format=short
+      - name: Build for arm64 and amd64 and publish
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        if: env.PUBLISH == 'true'
+        with:
+          context: docker
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
