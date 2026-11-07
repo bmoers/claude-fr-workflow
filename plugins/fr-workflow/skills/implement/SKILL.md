@@ -47,6 +47,11 @@ instead.
   **Never push, never merge** — `/fr-workflow:ship` pushes after its code and
   security review.
 - A question only the user can answer → `fr.sh project-status <issue> input`
+  — with `stop_comments: on` also on the issue, the question itself in the
+  issue's language through `fr.sh stop-comment <ID> question <file>` (*Stop
+  comments* in the ship skill), then wait for `fr.sh decision <ID> --wait 60
+  --max 86400` in the background as that section says: a comment `accept all`
+  means your proposed answer, `abort` means stop
   (`<issue>` from the FR doc's frontmatter; exit 5 is a note, not a stop), then
   ask and stop. When the answer comes and work goes on:
   `fr.sh project-status <issue> running`.

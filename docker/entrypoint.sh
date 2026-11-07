@@ -17,6 +17,8 @@
 #                            for unassigned ones          (default: GH_TOKEN's login)
 #   WORKFLOW_LOCAL           more per-machine profile lines (`key: value`),
 #                            e.g. notify_command, for .claude/workflow.local.md
+#   ATTACH_CONTAINER         the container's name on the host, for the attach
+#                            command in notifications (default: the container id)
 #   AUTO_MODE_ENVIRONMENT    extra lines for autoMode.environment, one per
 #                            line, written once into ~/.claude/settings.json
 #
@@ -61,10 +63,14 @@ say "checkout: $dir at $(git -C "$dir" rev-parse --abbrev-ref HEAD)"
 # reads them (docs/profile.md, "Per-machine values"). Only into a file the
 # repository ignores: the clone must stay clean.
 if git -C "$dir" check-ignore -q .claude/workflow.local.md 2>/dev/null; then
+  # attach_command: how a person on the host joins a session in here — every
+  # notification and stop comment names it, copy-ready; $HOSTNAME is the
+  # container id, which docker exec accepts
   { printf -- '---\nautopilot_assignee: %s\n' "${AUTOPILOT_ASSIGNEE:-$login}"
+    printf 'attach_command: docker exec -it -w %s %s claude attach\n' "$dir" "${ATTACH_CONTAINER:-$HOSTNAME}"
     [ -z "${WORKFLOW_LOCAL:-}" ] || printf '%s\n' "$WORKFLOW_LOCAL"
     printf -- '---\n'; } > "$dir/.claude/workflow.local.md"
-  say "local profile: autopilot_assignee ${AUTOPILOT_ASSIGNEE:-$login}"
+  say "local profile: autopilot_assignee ${AUTOPILOT_ASSIGNEE:-$login}, attach via docker exec on ${ATTACH_CONTAINER:-$HOSTNAME}"
 else
   say "warning: $REPO does not ignore .claude/workflow.local.md — no per-machine values, autopilot_assignee is the profile's"
 fi

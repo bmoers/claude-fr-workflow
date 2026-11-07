@@ -156,12 +156,23 @@ pitfalls that the code does not show.
   between several autopilots), and `fr.sh finish` cleans up after the merge
   (`autopilot_finish`). Deployments and production stay untouched.
 - **Per-machine profile** (0.8): `.claude/workflow.local.md`, ignored by git,
-  for the five keys that describe the machine (`LOCAL_KEYS` in `fr.sh`:
+  for the six keys that describe the machine (`LOCAL_KEYS` in `fr.sh`:
   `autopilot_assignee`, `notify_command`, `session_permission_mode`,
-  `autopilot_model`, `autopilot_effort`) — two containers cloning one
+  `autopilot_model`, `autopilot_effort`, `attach_command`) — two containers cloning one
   repository would otherwise serve the same login. Nothing else is read from
   it: what the project decides stays committed. Read where `fr.sh` runs, so
   the main checkout; FR worktrees never have it.
+- **Stops reach the person** (0.8): the first FR through the container sat
+  an hour at the review gate with its ask inside a session nobody saw. So the
+  pipeline's rows say how to go on (`attach_command`, the skill to re-run, a
+  comment), `notify_repeat` re-notifies, and `stop_comments: on` puts the ask
+  on the issue and takes the answer from a comment (`fr.sh decision`:
+  `accept all | accept 1,3 | fix 2 | abort`, first line, trusted like the fix
+  loop's comments — admin or write). The decision stays the person's; the
+  skill only reads it. A comment under one's own token notifies nobody: the
+  chat channel is the push in stage 1. The review gate triages findings
+  against the FR text before stopping — decided with Boris 2026-11-07 after
+  five FR-conform findings stopped the factory.
 - **Container** (0.8): `docker/` holds a generic image — Playwright base image
   (Chromium, Xvfb, `pwuser`), Claude Code pinned via npm, gh from its release
   package — and an entrypoint that prepares a clone and keeps `fr.sh launch

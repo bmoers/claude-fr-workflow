@@ -290,11 +290,19 @@ in the user's session with `--here`.
   flags and the project's settings reach it.
 - **It tells you through `notify_command`.** Claude Code notifies about a
   background session only while `claude agents` is open, so `pipeline --wait`
-  runs the profile's `notify_command` for every row that needs the user and is
-  new since its last result — `report` rows and a PR waiting for the merge —
-  with `FR_ID`, `FR_PHASE`, `FR_DETAIL`, `FR_SESSION`, `FR_REPO` and
-  `FR_MESSAGE` in the environment; `fr.sh notify` runs it for the autopilot's
-  own summary. The channel is the project's; empty means nothing.
+  runs the profile's `notify_command` for every row that needs the user when
+  it is new — `report` rows and a PR waiting for the merge — and again every
+  `notify_repeat` minutes while it stays, with `FR_ID`, `FR_PHASE`,
+  `FR_DETAIL`, `FR_SESSION`, `FR_REPO` and `FR_MESSAGE` in the environment;
+  the detail says how to go on (`attach_command` of this machine, the skill to
+  run again, or that a comment answers it); `fr.sh notify` runs it for the
+  autopilot's own summary. The channel is the project's; empty means nothing.
+- **A stop may be answered on the issue** (`stop_comments: on`): the skill
+  posts the ask through `fr.sh stop-comment`, in the issue's language, with
+  the other assignees and the attach command, and waits with `fr.sh decision
+  --wait` for a comment `accept all`, `accept 1,3`, `fix 2` or `abort` from
+  someone with write access (the fix loop's trust rule); the autopilot does
+  not decide and never answers.
 - **One autopilot.** `launch autopilot` refuses (exit 3) while the recorded one
   is busy or waiting, stops one whose loop ended, and starts the new one with
   nothing seen, so its first `pipeline --wait` returns at once. It prints the
@@ -307,8 +315,8 @@ in the user's session with `--here`.
   its branch has it: merge the base branch into the FR branch, or change the
   profile before the FR starts. Beside the profile, `.claude/workflow.local.md`
   (ignored by git) may set the per-machine keys `autopilot_assignee`,
-  `notify_command`, `session_permission_mode`, `autopilot_model` and
-  `autopilot_effort`; nothing else is read from it.
+  `notify_command`, `session_permission_mode`, `autopilot_model`,
+  `autopilot_effort` and `attach_command`; nothing else is read from it.
 - **At most `autopilot_sessions`** FR sessions at a time (default 3); further
   starts wait.
 - **The queue from the board** (`autopilot_queue: project`): every `pipeline`
@@ -460,6 +468,8 @@ applies.
 | `project-status <issue> <event> [<gate>]`                         | appends the event to the FR's local log, then the board column per `project_status`: `defined`, `input`, `running`, `implemented`, `failed`, `blocked`, `approval`, `done`. Exit 5 = board not written, reason on stderr — a line for the report, never a stop                                   |
 | `hook setup\|teardown <ID> <path>`                                | the profile's `worktree_setup` / `worktree_teardown` in that worktree, without stdin, with `FR_ID`, `FR_NUMBER`, `FR_BRANCH`, `FR_WORKTREE`; output passes through. Exit 6 = the hook failed; no hook in the profile = nothing to run, exit 0                                                    |
 | `notify <ID\|autopilot> <phase> [<detail>]`                       | the profile's `notify_command` with `FR_ID`, `FR_PHASE`, `FR_DETAIL`, `FR_SESSION`, `FR_REPO`, `FR_MESSAGE` in its environment, in the main checkout, without stdin; nothing without the key; exit 6 when it failed                                                                              |
+| `stop-comment <ID> <gate> <body-file>`                            | with `stop_comments: on`: the body plus the other assignees and this machine's `attach_command` with the lingering session, as a comment on the FR issue; logged as `comment stop <gate>`; exit 6 when not posted                                                                                |
+| `decision <ID> [--wait <s> [--max <s>]]`                          | `verb<TAB>items<TAB>login` of the newest trusted command comment after the stop comment — `accept`/`fix` with `all` or `1,3`, `abort` with `-`; exit 4 when there is none, or after `--max`                                                                                                      |
 | `validate <issue\|ID\|file> [--rev <rev> \| --local]`             | the spec delta against the base branch's specs (`spec_dir`): `error:` / `warning:` / `ok:` lines, exit 4 on errors                                                                                                                                                                               |
 | `fingerprint <capability> <requirement> [--rev <rev> \| --local]` | 8 hex of the requirement's text — what a MODIFIED/REMOVED/RENAMED block pins as `Base:`; exit 1 when there is no such requirement                                                                                                                                                                |
 | `fold <ID\|file> [--dry-run]`                                     | the spec delta into this checkout's spec files, validated against them first — nothing is written on errors (exit 4); prints the operations and the changed files                                                                                                                                |

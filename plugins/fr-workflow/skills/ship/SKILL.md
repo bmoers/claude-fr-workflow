@@ -64,6 +64,26 @@ local FR log, and only `checks` and `ci` can enter its fix loop:
 e.g. `fr.sh project-status <issue> failed ci`. Exit 5 (not written) is a line
 in the report, never a reason to stop.
 
+**Stop comments and answers by comment** (`stop_comments: on` in the profile):
+every stop in the table that waits for a person also goes onto the FR issue,
+where the board card shows it and people read without a terminal. Write the
+ask to a file in the issue's language — what stopped, the findings as a table
+(the risk, never how to exploit it; on a public repository no security
+details at all), what you ask (per finding: fix, accept, abort — or the one
+decision the stop needs) and what you recommend — then
+`fr.sh stop-comment <ID> <gate> <file>`: it posts the body, adds the
+assignees who are not the token's own login (one's own comment notifies
+nobody) and this machine's command to join this session. Exit 6 = not posted;
+say so and go on. Then **wait for the answer in the background**:
+`fr.sh decision <ID> --wait 60 --max 86400` returns `verb<TAB>items<TAB>login`
+as soon as someone with write access comments `accept all`, `accept 1,3`,
+`fix 2` or `abort` (first line of the comment, a `/fr` prefix allowed); act on
+it exactly as if that person had said it here, and name them in the review
+notes. Exit 4 after `--max` → end your turn with the ask in your report; the
+user attaches or runs this skill again. A user who attaches may answer
+directly instead — then stop the background wait. Without `stop_comments`
+nothing changes: the ask is your report, the answer comes at the prompt.
+
 ## 0. Preflight
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/fr.sh check` passes; the current branch is not
@@ -126,8 +146,16 @@ in the report, never a reason to stop.
       does not help.
 4. Other findings: code findings — from `/code-review` and the review agents —
    follow `review_gate`, security findings follow `security_gate` (default
-   `stop`, independent of `review_gate`):
-   - `stop` → list them; the user decides per finding: fix, accept, or abort;
+   `stop`, independent of `review_gate`). **Triage code findings against the
+   FR first:** a finding that objects to behaviour the FR's *Desired behaviour*
+   or acceptance criteria require, or asks for something its *Scope* puts out
+   of scope, is not a finding against the change — the reviewers did not read
+   the FR. Set those aside into the *Review notes* (one line each: the finding,
+   the FR line that decides it) without a stop; a finding the FR does not
+   cover is what the gate is for. Secrets (3.) and security findings are never
+   set aside. Then:
+   - `stop` → list the remaining ones; the user decides per finding: fix,
+     accept, or abort;
    - `report` → collect them and go on.
 5. After **any** fix (a new local commit): run **all** reviews again on the range.
    A fix for a code finding can open a security hole.

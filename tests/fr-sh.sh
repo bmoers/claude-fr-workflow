@@ -31,6 +31,10 @@ case "$*" in
   "auth status") exit 0 ;;
   "issue list"*) [ ! -f "$STUB/list-fails" ] || exit 1; answer issues ;;
   "issue view"*"--json body"*) if [ -f "$STUB/body-$3" ]; then answer "body-$3"; else answer body; fi ;;   # gh issue view <n> -R …
+  "issue view"*"--json assignees"*) answer assignees ;;
+  "issue view"*"--json comments"*) answer comments ;;
+  "issue comment"*) cat > "$STUB/comment.in" ;;
+  "api user"*) answer user ;;
   "issue view"*) answer meta ;;
   "api repos/"*/sub_issues*) answer subs ;;
   "api repos/"*/timeline*) answer timeline ;;
@@ -774,7 +778,7 @@ check "notify: needs a phase" '[ "$rc" = 1 ] && grep -q usage "$SP/n.out"' "exit
 printf -- '---\nnotify_command: echo "$FR_MESSAGE" >> "$STUB/notified"\n---\n' > .claude/workflow.md
 rm -f "$STUB/notified" "$(git rev-parse --git-common-dir)/fr-workflow/autopilot.seen"
 "$FR" pipeline --no-fetch --wait 0 > "$SP/w.out" 2>&1; rc=$?
-check "pipeline --wait: a report row goes to notify_command" '[ "$rc" = 0 ] && [ "$(cat "$STUB/notified")" = "FR-90 failed: review" ]' "exit $rc: $(cat "$SP/w.out"; cat "$STUB/notified" 2>/dev/null)"
+check "pipeline --wait: a report row goes to notify_command, with how to go on" '[ "$rc" = 0 ] && [ "$(cat "$STUB/notified")" = "FR-90 failed: review — the ship session ended: /fr-workflow:ship FR-90 runs the gate again" ]' "exit $rc: $(cat "$SP/w.out"; cat "$STUB/notified" 2>/dev/null)"
 "$FR" pipeline --no-fetch --wait 0 >/dev/null 2>&1
 check "pipeline --wait: the same row is not notified twice" '[ "$(wc -l < "$STUB/notified" | tr -d " ")" = 1 ]' "$(cat "$STUB/notified")"
 "$FR" project-status 90 blocked conflict >/dev/null 2>&1
@@ -782,10 +786,47 @@ check "pipeline --wait: the same row is not notified twice" '[ "$(wc -l < "$STUB
 check "pipeline --wait: a changed row is notified again" '[ "$(tail -n 1 "$STUB/notified")" = "FR-90 blocked: conflict" ]' "$(cat "$STUB/notified")"
 "$FR" pipeline --no-fetch >/dev/null 2>&1
 check "pipeline without --wait never notifies (status is read-only)" '[ "$(wc -l < "$STUB/notified" | tr -d " ")" = 2 ]' "$(cat "$STUB/notified")"
+# notify_repeat: a row that stays is notified again after that many minutes, with how long it waits
+N="$(git rev-parse --git-common-dir)/fr-workflow/autopilot.notified"
+awk -F '\t' -v OFS='\t' -v t="$(( $(date -u +%s) - 7300 ))" '{ $1 = t; $2 = t; print }' "$N" > "$N.tmp" && mv "$N.tmp" "$N"
+"$FR" pipeline --no-fetch --wait 0 >/dev/null 2>&1
+check "pipeline --wait: a row still there after notify_repeat minutes is notified again, with the time it waits" '[ "$(tail -n 1 "$STUB/notified")" = "FR-90 blocked: conflict — still waiting after 2h01m" ] && [ "$(wc -l < "$STUB/notified" | tr -d " ")" = 3 ]' "$(cat "$STUB/notified")"
+printf -- '---\nnotify_command: echo "$FR_MESSAGE" >> "$STUB/notified"\nnotify_repeat: 0\n---\n' > .claude/workflow.md
+awk -F '\t' -v OFS='\t' -v t="$(( $(date -u +%s) - 7300 ))" '{ $1 = t; $2 = t; print }' "$N" > "$N.tmp" && mv "$N.tmp" "$N"
+"$FR" pipeline --no-fetch --wait 0 >/dev/null 2>&1
+check "pipeline --wait: notify_repeat 0 notifies once" '[ "$(wc -l < "$STUB/notified" | tr -d " ")" = 3 ]' "$(cat "$STUB/notified")"
 printf -- '---\nnotify_command: exit 3\n---\n' > .claude/workflow.md
 "$FR" project-status 90 failed security >/dev/null 2>&1
 "$FR" pipeline --no-fetch --wait 0 > "$SP/w.out" 2>&1; rc=$?
 check "pipeline --wait: a failing notify_command is reported on stderr, the result still comes" '[ "$rc" = 0 ] && grep -q "^FR-90	failed	report	security" "$SP/w.out" && grep -q "notify_command failed" "$SP/w.out"' "exit $rc: $(cat "$SP/w.out")"
+# stop comments: the body, who should look, how to answer; only with stop_comments on
+printf -- '---\nnotify_command: echo "$FR_MESSAGE" >> "$STUB/notified"\nstop_comments: on\n---\n' > .claude/workflow.md
+printf -- '---\nattach_command: docker exec -it -w /work/ntf box claude attach\n---\n' > .claude/workflow.local.md
+echo "$(date -u +%s) launch ship ses90ship" >> "$(git rev-parse --git-common-dir)/fr-workflow/FR-90.log"
+"$FR" project-status 90 failed review >/dev/null 2>&1
+stub user boris; stub assignees "$(printf 'boris\nflorian')"
+printf 'Review gestoppt: 5 Befunde.\n\n| # | Befund |\n| - | ------ |\n| 1 | x |\n' > "$SP/body.md"
+: > "$STUB_LOG"; rm -f "$STUB/comment.in"
+"$FR" stop-comment FR-90 review "$SP/body.md" > "$SP/sc.out" 2>&1; rc=$?
+check "stop-comment: posts the body with the other assignees and this machine's attach command, logs it" '[ "$rc" = 0 ] && grep -q "^issue comment 90 -R acme/ntf --body-file -" "$STUB_LOG" && grep -q "^Review gestoppt: 5 Befunde" "$STUB/comment.in" && grep -qx "@florian · \`docker exec -it -w /work/ntf box claude attach ses90ship\`" "$STUB/comment.in" && grep -q " comment stop review$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-90.log" && grep -q "posted on acme/ntf#90 for @florian" "$SP/sc.out"' "exit $rc: $(cat "$SP/sc.out" "$STUB/comment.in" 2>/dev/null)"
+check "pipeline: a failed gate with a stop comment says to answer on the issue, or where to attach" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-90	failed	report	review — answer on the issue (accept all | accept 1,3 | fix 2 | abort), or docker exec -it -w /work/ntf box claude attach ses90ship$"' "$("$FR" pipeline --no-fetch 2>&1)"
+printf -- '---\nnotify_command: echo "$FR_MESSAGE" >> "$STUB/notified"\n---\n' > .claude/workflow.md
+: > "$STUB_LOG"
+"$FR" stop-comment FR-90 review "$SP/body.md" > "$SP/sc.out" 2>&1; rc=$?
+check "stop-comment: stop_comments off → nothing posted, exit 0" '[ "$rc" = 0 ] && grep -q "nothing posted" "$SP/sc.out" && ! grep -q "issue comment" "$STUB_LOG"' "exit $rc: $(cat "$SP/sc.out")"
+# decisions by comment: after the stop comment, from a trusted author, first line a command
+now=$(date -u +%s)
+stub comments "$(printf 'comment\t%s\tOWNER\tboris\taccept all\ncomment\t%s\tNONE\tstranger\tabort\ncomment\t%s\tOWNER\tboris\tAccept 1, 3' "$((now - 500))" "$((now + 5))" "$((now + 10))")"
+"$FR" decision FR-90 > "$SP/d.out" 2>&1; rc=$?
+check "decision: the newest trusted command after the stop comment, items normalised; older and untrusted ones ignored" '[ "$rc" = 0 ] && [ "$(cat "$SP/d.out")" = "$(printf "accept\t1,3\tboris")" ] && grep -q " decision accept 1,3 by boris$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-90.log"' "exit $rc: $(cat "$SP/d.out")"
+stub comments "$(printf 'comment\t%s\tOWNER\tboris\t/fr abort' "$((now + 20))")"
+check "decision: abort, with a /fr prefix" '[ "$("$FR" decision FR-90 2>/dev/null)" = "$(printf "abort\t-\tboris")" ]' "$("$FR" decision FR-90 2>&1)"
+stub comments "$(printf 'comment\t%s\tOWNER\tboris\tlooks good, accept all of it' "$((now + 20))")"
+"$FR" decision FR-90 > "$SP/d.out" 2>&1; rc=$?
+check "decision: prose is no command → exit 4" '[ "$rc" = 4 ] && grep -q "no decision" "$SP/d.out"' "exit $rc: $(cat "$SP/d.out")"
+"$FR" decision FR-90 --wait 1 --max 1 > "$SP/d.out" 2>&1; rc=$?
+check "decision --wait: gives up after --max with exit 4" '[ "$rc" = 4 ] && grep -q "within 1 s" "$SP/d.out"' "exit $rc: $(cat "$SP/d.out")"
+nostub comments; nostub user; nostub assignees; rm -f .claude/workflow.local.md
 # a PR that waits for the merge needs the user too
 printf -- '---\nnotify_command: echo "$FR_MESSAGE" >> "$STUB/notified"\n---\n' > .claude/workflow.md
 branch_fr feat/fr-91-r FR-91-r.md FR-91 Ninety-one in-review "" "src/r"

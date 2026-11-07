@@ -56,6 +56,8 @@ tokens.
 | `autopilot_sessions`      | `3`                                                           | FR sessions (implementation, fix, ship) the autopilot runs at a time; further starts wait                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `session_permission_mode` | —                                                             | permission mode of the sessions `launch` starts — the autopilot's, implementation, fix and ship sessions — passed as `--permission-mode`; empty = your own default. A background session cannot answer a prompt: `auto` lets it work unattended within Claude Code's auto mode. Allowed: `default`, `acceptEdits`, `auto`, `dontAsk` — `bypassPermissions` is refused, the profile is a committed file                                                                                                              |
 | `notify_command`          | —                                                             | command the autopilot runs for every FR that needs you — a session waiting at a prompt, a stopped gate, a stalled session, a PR waiting for your merge — with `FR_ID`, `FR_PHASE`, `FR_DETAIL`, `FR_SESSION`, `FR_REPO` and `FR_MESSAGE` (one line of all of it) in its environment; use them quoted. The channel is yours: `terminal-notifier -message "$FR_MESSAGE"`, a Slack webhook, ntfy. Empty = nothing — Claude Code itself tells you about a waiting background session only while `claude agents` is open |
+| `notify_repeat`           | `120`                                                         | minutes after which a row that still needs you is sent to `notify_command` again, with how long it has waited; `0` = once. Checked whenever `pipeline --wait` returns, so at the latest after its `--max`                                                                                                                                                                                                                                                                                                           |
+| `stop_comments`           | `off`                                                         | `on` = a skill that stops for you also posts the ask on the FR issue — what stopped, the findings, what it asks, who should look (the other assignees), how to join the session — and then waits for an answer as a comment: `accept all`, `accept 1,3`, `fix 2`, `abort`, from someone with write access. See [stops that wait for you](#stops-that-wait-for-you)                                                                                                                                                  |
 | `fix_loop`                | `off`                                                         | what the autopilot sends back to a fresh implementation session instead of reporting it: `checks` = the local checks and red CI; `checks+comments` = also new PR comments by trusted authors. See [fix loop](#fix-loop)                                                                                                                                                                                                                                                                                             |
 | `fix_attempts`            | `2`                                                           | fix sessions per FR; then the FR is reported                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `fix_skip_checks`         | `[]`                                                          | check names that always stop, never go to the fix loop — security scanners above all, e.g. `[CodeQL, gitleaks]`                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -300,11 +302,39 @@ notify_command: terminal-notifier -message "$FR_MESSAGE"
 A value there wins over the profile's; an empty value falls back to it. Only
 these keys are read from the local file: `autopilot_assignee`,
 `notify_command`, `session_permission_mode`, `autopilot_model`,
-`autopilot_effort`. Any other key there is ignored and `fr.sh check` says so —
+`autopilot_effort`, `attach_command` (how a person on this machine joins a
+session — default `claude attach`; a container writes its `docker exec …`
+form, so every message that names a session is copy-ready). Any other key
+there is ignored and `fr.sh check` says so —
 what the project decides stays in the committed profile. The local file is read
 where `fr.sh` runs: the main checkout for the autopilot, `pipeline`, `launch`
 and `queue sync`; an FR worktree does not have it. The
 [container](container.md) writes it from its environment.
+
+## Stops that wait for you
+
+A gate that stops, a question only you can answer, a PR waiting for your
+merge: the autopilot's pipeline reports each once and, with `notify_command`,
+sends it to your channel — with what to do: the command to join the session
+while it lingers, the skill to run again once it ended, or that the answer may
+be a comment. With `notify_repeat` the reminder comes again every so many
+minutes while the row stays.
+
+With `stop_comments: on` the stop is also on the FR issue, written by the
+session in the issue's language, so the board card itself says what is asked.
+The answer may then be a comment on that issue — `accept all`, `accept 1,3`,
+`fix 2`, `abort` as its first line, a `/fr` prefix allowed — from a person
+GitHub's collaborator permission trusts (admin or write, as in the fix loop);
+the session picks it up within a minute and acts as if it had been said at the
+prompt. Joining the session still works. Note that a comment posted with your
+own token does not notify you: in a personal container the chat channel is the
+push, the comment the record; a shared autopilot with its own GitHub identity
+notifies the assignees it mentions.
+
+The review gate triages first: a `/code-review` finding that objects to
+behaviour the FR requires, or to something the FR puts out of scope, goes into
+the review notes and does not stop — only findings the FR does not cover do.
+Secrets and security findings always stop.
 
 ## Fix loop
 

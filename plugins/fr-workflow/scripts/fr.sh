@@ -75,7 +75,7 @@ PROFILE='.claude/workflow.md'
 # sessions run in. Only these keys are read from it — everything else about
 # the project stays in the committed profile.
 PROFILE_LOCAL='.claude/workflow.local.md'
-LOCAL_KEYS=' autopilot_assignee notify_command session_permission_mode autopilot_model autopilot_effort '
+LOCAL_KEYS=' autopilot_assignee notify_command session_permission_mode autopilot_model autopilot_effort attach_command '
 ISSUE_LIMIT=1000
 
 die() { echo "fr.sh: $*" >&2; exit 1; }
@@ -1073,7 +1073,7 @@ cmd_notify() { # <ID|autopilot> <phase> [<detail>]
   local id="$1" phase="$2" detail="${3:-}" main cmd sess="" msg rc
   local el ev eg ll lk ls nf ap
   main=$(main_worktree)
-  case "$PROFILE" in /*) ;; *) local PROFILE="$main/$PROFILE" ;; esac   # pipeline has switched already
+  case "$PROFILE" in /*) ;; *) local PROFILE="$main/$PROFILE" PROFILE_LOCAL="$main/$PROFILE_LOCAL" ;; esac   # pipeline has switched already
   cmd=$(cfg notify_command "")
   [ -n "$cmd" ] || return 0
   if [ "$id" != autopilot ]; then
@@ -1088,6 +1088,93 @@ cmd_notify() { # <ID|autopilot> <phase> [<detail>]
     echo "fr.sh: notify_command failed (exit $rc) for: $msg" >&2
     return "$HOOK_FAILED"   # a return, not an exit: pipeline --wait goes on after a failed notification
   fi
+}
+
+# --- stops that wait for a person --------------------------------------------
+#
+# A skill that stops at a gate says so on the FR issue (stop_comments: on):
+# the body it wrote, in the issue's language, plus who should look — the
+# issue's assignees other than the token's own login, since one's own comment
+# notifies nobody — and how to answer: this machine's attach command with the
+# session that lingers. The answer may then be a comment: `accept all`,
+# `accept 1,3`, `fix 2`, `abort`, from someone GitHub's collaborator permission
+# trusts (admin or write, as in the fix loop); `fr.sh decision` finds it.
+
+# the last `comment stop` in the FR's log came after its last event
+stop_comment_posted() { # <ID>
+  local f; f="$(state_dir)/$1.log"
+  [ -f "$f" ] && awk '$2 == "event" { e = NR } $2 == "comment" && $3 == "stop" { c = NR } END { exit !(c > e) }' "$f"
+}
+
+cmd_stop_comment() { # <ID> <gate> <body file>
+  [ $# -eq 3 ] || die "usage: fr.sh stop-comment <ID> <gate> <body-file>"
+  local id gate="$2" body="$3" ref n repo me a mention="" footer="" sess="" main
+  local el ev eg ll lk ls nf ap
+  printf '%s' "$gate" | grep -qE '^[a-z][a-z0-9-]*$' || die "gate must be one lowercase word, e.g. review — got '$gate'"
+  [ -f "$body" ] || die "no such file: $body"
+  main=$(main_worktree)
+  case "$PROFILE" in /*) ;; *) local PROFILE="$main/$PROFILE" PROFILE_LOCAL="$main/$PROFILE_LOCAL" ;; esac
+  if [ "$(cfg stop_comments off)" != on ]; then echo "stop-comment: stop_comments is off — nothing posted"; return 0; fi
+  ref=$(issue_ref "$1"); id="$PREFIX-${ref##*#}"; n=${ref##*#}; repo=${ref%#*}
+  read_facts "$id"; [ "$ls" = "-" ] || sess=$ls
+  me=$(gh api user --jq .login 2>/dev/null </dev/null || true)
+  for a in $(gh issue view "$n" -R "$repo" --json assignees --jq '.assignees[].login' 2>/dev/null </dev/null || true); do
+    [ "$a" = "$me" ] || mention="$mention @$a"
+  done
+  footer=${mention# }
+  [ -z "$sess" ] || footer="${footer:+$footer · }\`$(attach_cmd) $sess\`"
+  if ! { cat "$body"; [ -z "$footer" ] || printf '\n\n%s\n' "$footer"; } | gh issue comment "$n" -R "$repo" --body-file - >/dev/null 2>&1; then
+    echo "fr.sh: stop comment not posted on $repo#$n" >&2; return "$HOOK_FAILED"
+  fi
+  log_line "$id" "comment stop $gate"
+  echo "stop-comment: $id $gate posted on $repo#$n${mention:+ for$mention}"
+}
+
+# A decision given as a comment on the FR issue: the newest comment after the
+# stop comment (or the last event) whose first line is a command, from a
+# trusted author. Prints "verb<TAB>items<TAB>login": accept|fix with `all` or
+# `1,3`, abort with `-`. Exit 4 when there is none — with --wait it looks
+# again every <s> seconds until one comes or --max <s> passed.
+cmd_decision() { # <ID> [--wait <s> [--max <s>]]
+  [ $# -ge 1 ] || die "usage: fr.sh decision <ID> [--wait <s> [--max <s>]]"
+  local id ref n repo wait="" max=0 since t0 found verb items login line
+  local el ev eg ll lk ls nf ap
+  ref=$(issue_ref "$1"); id="$PREFIX-${ref##*#}"; n=${ref##*#}; repo=${ref%#*}; shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --wait) [ $# -ge 2 ] || die "--wait needs seconds"; wait="$2"; shift ;;
+      --max) [ $# -ge 2 ] || die "--max needs seconds"; max="$2"; shift ;;
+      *) die "usage: fr.sh decision <ID> [--wait <s> [--max <s>]]" ;;
+    esac
+    shift
+  done
+  [ -z "$wait" ] || printf '%s' "$wait" | grep -qE '^[1-9][0-9]*$' || die "--wait needs seconds"
+  printf '%s' "$max" | grep -qE '^[0-9]+$' || die "--max needs seconds"
+  # since the stop comment, else since the last event: the ask itself never counts
+  since=$(awk '$2 == "comment" && $3 == "stop" { c = $1 } $2 == "event" { e = $1 } END { print (c != "" ? c : (e != "" ? e : 0)) }' "$(state_dir)/$id.log" 2>/dev/null || echo 0)
+  t0=$(date -u +%s)
+  while :; do
+    found=$(gh issue view "$n" -R "$repo" --json comments \
+      --jq '.comments[] | "comment\t\(.createdAt | fromdateiso8601)\t\(.authorAssociation)\t\(.author.login)\t\((.body | split("\n") | map(select(length > 0)) | .[0] // "") | gsub("[\t\r]"; " ") | .[0:120])"' 2>/dev/null </dev/null |
+      trusted_comments "$since" |
+      awk -F '\t' '{
+        l = tolower($2); gsub(/^[ \t]+|[ \t]+$/, "", l)
+        sub(/^(\/fr(-workflow)?:?|fr:) */, "", l)
+        if (l ~ /^(accept|fix)( +all)?$/) { v = l; sub(/ .*/, "", v); print v "\tall\t" $1 }
+        else if (l ~ /^(accept|fix) +[0-9]+( *, *[0-9]+)*$/) { v = l; sub(/ .*/, "", v); it = l; sub(/^[a-z]+ +/, "", it); gsub(/ /, "", it); print v "\t" it "\t" $1 }
+        else if (l ~ /^abort$/) print "abort\t-\t" $1
+      }' | tail -n 1)
+    if [ -n "$found" ]; then
+      verb=$(printf '%s' "$found" | cut -f1); items=$(printf '%s' "$found" | cut -f2); login=$(printf '%s' "$found" | cut -f3)
+      log_line "$id" "decision $verb $items by $login"
+      printf '%s\n' "$found"; return 0
+    fi
+    [ -n "$wait" ] || { echo "fr.sh: no decision on $repo#$n yet" >&2; exit 4; }
+    if [ "$max" -gt 0 ] && [ $(( $(date -u +%s) - t0 + wait )) -gt "$max" ]; then
+      echo "fr.sh: no decision on $repo#$n within $max s" >&2; exit 4
+    fi
+    sleep "$wait"
+  done
 }
 
 # --- spec model ---------------------------------------------------------------
@@ -1611,8 +1698,14 @@ session_pid() { # <session id, or its prefix> → the pid claude agents lists, o
     [.[] | select((.sessionId // "") | startswith($s))]
     | if length == 0 then "" else ((.[0].pid // "") | tostring) end' 2>/dev/null || true
 }
+# How a person on this machine joins a session: `claude attach` on a laptop,
+# `docker exec -it … claude attach` written by a container's entrypoint — a
+# per-machine key, so every line that names a waiting session can be copied.
+attach_cmd() { cfg attach_command "claude attach"; }
+ago() { printf '%dh%02dm' $(( $1 / 3600 )) $(( ($1 % 3600) / 60 )); }   # <seconds>
+
 # the pipeline row of a launched session that waits at a prompt (lk, ls of the caller)
-waiting_row() { printf 'waiting\treport\tthe %s session %s waits for you: claude attach %s\n' "$lk" "$ls" "$ls"; }
+waiting_row() { printf 'waiting\treport\tthe %s session %s waits for you: %s %s\n' "$lk" "$ls" "$(attach_cmd)" "$ls"; }
 
 # --permission-mode for the sessions launch starts, from the profile's
 # session_permission_mode, or nothing — then the user's own default applies.
@@ -1714,7 +1807,7 @@ cmd_queue() {
         mv "$q.tmp" "$q"
       done
       queue_ids ;;
-    clear) rm -f "$q" "$(state_dir)/autopilot.seen" ;;
+    clear) rm -f "$q" "$(state_dir)/autopilot.seen" "$(state_dir)/autopilot.notified" ;;
     sync) queue_sync ;;
     list) queue_ids ;;
     session) if [ -f "$(state_dir)/autopilot.session" ]; then cat "$(state_dir)/autopilot.session"; fi ;;
@@ -1894,7 +1987,7 @@ phase_of() { # <row> <wave> <conflicts>
       if [ "$live" = 1 ]; then printf 'implemented\tship\ta session still holds the worktree\n'
       else printf 'implemented\tship\t\n'; fi
       return 0 ;;
-    input)   printf 'waiting\treport\t%s: claude attach %s\n' "$eg" "$ls"; return 0 ;;
+    input)   printf 'waiting\treport\t%s: %s %s\n' "$eg" "$(attach_cmd)" "$ls"; return 0 ;;
     blocked) printf 'blocked\treport\t%s\n' "$eg"; return 0 ;;
     failed)
       if [ "$eg" = checks ] || [ "$eg" = ci ]; then
@@ -1908,7 +2001,18 @@ phase_of() { # <row> <wave> <conflicts>
         if [ -n "$skips" ]; then printf 'failed\treport\tci: %s never goes to the fix loop\n' "$skips"
         else printf 'failed\t%s\n' "$(fix_verdict "$eg" checks "$nf")"; fi
       else
-        printf 'failed\treport\t%s\n' "$eg"
+        # a gate that stopped for the user: say how to answer — on the issue
+        # when a stop comment was posted, by joining the session while it
+        # lingers, by running the skill again once it ended
+        if stop_comment_posted "$id"; then
+          printf 'failed\treport\t%s — answer on the issue (accept all | accept 1,3 | fix 2 | abort)%s\n' "$eg" "$([ "$ls" = "-" ] || printf ', or %s %s' "$(attach_cmd)" "$ls")"
+        else
+          case "$sst" in
+            idle|waiting) printf 'failed\treport\t%s — the %s session %s waits for your decision: %s %s\n' "$eg" "$lk" "$ls" "$(attach_cmd)" "$ls" ;;
+            gone)         printf 'failed\treport\t%s — the %s session ended: /fr-workflow:%s %s runs the gate again\n' "$eg" "$lk" "$([ "$lk" = ship ] && echo ship || echo start)" "$id" ;;
+            *)            printf 'failed\treport\t%s\n' "$eg" ;;
+          esac
+        fi
       fi
       return 0 ;;
   esac
@@ -1982,10 +2086,10 @@ pipeline_once() {
 # anyway; --wait 0 returns at once and records what it returned, for a first
 # look. The autopilot wakes for changes, not for every check.
 cmd_pipeline() {
-  local wait="" max=0 nofetch="" out seen t0 id phase action detail
+  local wait="" max=0 nofetch="" out seen t0 id phase action detail notified now repeat key rec first last
   # the autopilot's settings come from the main checkout's profile — the base
   # branch's — wherever this runs; never from the copy on an FR branch
-  local PROFILE="$(main_worktree)/$PROFILE"
+  local PROFILE="$(main_worktree)/$PROFILE" PROFILE_LOCAL="$(main_worktree)/$PROFILE_LOCAL"
   while [ $# -gt 0 ]; do
     case "$1" in
       --no-fetch) nofetch=1 ;;
@@ -2008,14 +2112,31 @@ cmd_pipeline() {
     sleep "$wait"
     [ -n "$nofetch" ] || do_fetch
   done
-  # rows that need the user — reports, and a PR waiting for the merge — and are
-  # new since the last result go to the profile's notify_command
+  # rows that need the user — reports, and a PR waiting for the merge — go to
+  # the profile's notify_command when they are new, and again every
+  # notify_repeat minutes while they stay (0 = once); autopilot.notified keeps
+  # first and last notification per row, rows that went away are forgotten
   if [ -n "$(cfg notify_command "")" ]; then
+    notified="$(state_dir)/autopilot.notified"; now=$(date -u +%s)
+    repeat=$(cfg notify_repeat 120)
+    printf '%s' "$repeat" | grep -qE '^[0-9]+$' || die "notify_repeat must be minutes, e.g. 120 — got '$repeat'"
+    repeat=$((repeat * 60))
+    : > "$notified.new"
     printf '%s\n' "$out" | awk -F '\t' 'NR > 1 && ($3 == "report" || ($2 == "review" && $3 == "none"))' |
       while IFS=$'\t' read -r id phase action detail; do
-        if [ -f "$seen" ] && grep -qxF "$(printf '%s\t%s\t%s\t%s' "$id" "$phase" "$action" "$detail")" "$seen"; then continue; fi
-        cmd_notify "$id" "$phase" "$detail" || true
+        key=$(printf '%s\t%s\t%s\t%s' "$id" "$phase" "$action" "$detail")
+        rec=""; [ ! -f "$notified" ] || rec=$(grep -F -- "	$key" "$notified" | head -n 1 || true)
+        if [ -z "$rec" ]; then
+          cmd_notify "$id" "$phase" "$detail" || true; first=$now; last=$now
+        else
+          first=$(printf '%s' "$rec" | cut -f1); last=$(printf '%s' "$rec" | cut -f2)
+          if [ "$repeat" -gt 0 ] && [ $((now - last)) -ge "$repeat" ]; then
+            cmd_notify "$id" "$phase" "$detail — still waiting after $(ago $((now - first)))" || true; last=$now
+          fi
+        fi
+        printf '%s\t%s\t%s\n' "$first" "$last" "$key" >> "$notified.new"
       done
+    mv "$notified.new" "$notified"
   fi
   printf '%s\n' "$out" > "$seen"
   printf '%s\n' "$out"
@@ -2413,6 +2534,8 @@ case "$cmd" in
   finish) cmd_finish "$@" ;;
   hook) cmd_hook "$@" ;;
   notify) cmd_notify "$@" ;;
+  stop-comment) cmd_stop_comment "$@" ;;
+  decision) cmd_decision "$@" ;;
   validate) cmd_validate "$@" ;;
   fingerprint) cmd_fingerprint "$@" ;;
   fold) cmd_fold "$@" ;;

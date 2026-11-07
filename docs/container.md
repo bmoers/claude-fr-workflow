@@ -179,9 +179,16 @@ merge the autopilot cleans up and the card reaches *Done*.
 
 You see progress in three places: the board, the pull request, and
 `docker exec fr-autopilot claude agents --json`. A session that needs you —
-a gate that stopped, a question — shows as `waiting`; the profile's
-`notify_command` tells you, if the profile has one. Point it at a webhook or
-a chat; a desktop notifier has no desktop inside a container.
+a gate that stopped, a question — is reported by the autopilot; the profile's
+`notify_command` sends it to your channel with the command to join the
+session, copy-ready for your laptop (the container writes `attach_command`
+for that; name the container with `ATTACH_CONTAINER=fr-autopilot` so the
+command uses the name instead of the id). Point `notify_command` at a webhook
+or a chat; a desktop notifier has no desktop inside a container. With
+`stop_comments: on` in the profile the ask is also on the FR issue, and you
+answer with a comment: `accept all`, `accept 1,3`, `fix 2` or `abort`. A
+comment posted under your own token does not notify you — the chat is the
+push, the issue the record.
 
 ## Step 6 — Look inside, stop, restart
 
@@ -273,6 +280,7 @@ the commit, never a moving `latest`. Pushes and pull requests that touch
 | `CLAUDE_CODE_OAUTH_TOKEN` | yes      | from `claude setup-token`                                                                                                                                                                      |
 | `AUTOPILOT_ASSIGNEE`      | —        | the login whose FRs this container takes, `none` for unassigned ones; default: the token's login. Written to `.claude/workflow.local.md` — [per-machine values](profile.md#per-machine-values) |
 | `WORKFLOW_LOCAL`          | —        | more per-machine profile lines (`key: value`, one per line), e.g. `notify_command: scripts/notify-chat.sh`                                                                                     |
+| `ATTACH_CONTAINER`        | —        | the container's name on the host, used in the attach command of notifications and stop comments; default: the container id                                                                     |
 | `REPO_REF`                | —        | branch to keep checked out; default: the default branch                                                                                                                                        |
 | `KEEPALIVE_SECONDS`       | —        | pause between launch attempts, default `300`                                                                                                                                                   |
 | `MARKETPLACE`             | —        | register this plugin marketplace instead of the ones in the repository's `.claude/settings.json` — see [testing an unreleased plugin](#testing-an-unreleased-plugin)                           |
@@ -295,9 +303,10 @@ Every start, in this order, each step idempotent:
 2. Clone `REPO` into `~/work/<name>`, or `fetch --prune` and `pull --ff-only`
    the existing clone. The main checkout is only read — FR work happens in
    worktrees under `.claude/worktrees/`, as everywhere.
-3. `.claude/workflow.local.md` with `autopilot_assignee` and `WORKFLOW_LOCAL`,
-   if the repository ignores that file; otherwise a warning and the profile's
-   values apply.
+3. `.claude/workflow.local.md` with `autopilot_assignee`, `attach_command`
+   (`docker exec -it -w <clone> <container> claude attach`) and
+   `WORKFLOW_LOCAL`, if the repository ignores that file; otherwise a warning
+   and the profile's values apply.
 4. Trust for the clone and for `~/work` in `~/.claude.json` — the dialog no
    background session can answer.
 5. The plugin marketplaces named in the repository's `.claude/settings.json`

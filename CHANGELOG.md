@@ -61,6 +61,20 @@ session may hand the merge to GitHub, and the autopilot cleans up after it.
   `ghcr.io/bmoers/fr-workflow-autopilot:<tag>` for arm64 and amd64 on every
   release tag; the manual in `docs/container.md` takes a developer from the
   tokens to the first FR. First run 2026-11-07 against the sandbox.
+- **Stops reach the person.** The pipeline's `failed`, `waiting` and `input`
+  rows say how to go on — `attach_command` of this machine (a per-machine
+  key, default `claude attach`; the container writes its `docker exec` form)
+  with the session that lingers, the skill to run again once it ended, or that
+  a comment answers it. `notify_repeat` (default 120 minutes, `0` = once)
+  sends a row that still needs the user again, with how long it has waited.
+  `stop_comments: on`: a skill that stops posts the ask on the FR issue through
+  `fr.sh stop-comment` — the body in the issue's language, the other
+  assignees, the attach command — and waits with `fr.sh decision --wait` for
+  a comment `accept all`, `accept 1,3`, `fix 2` or `abort` from someone with
+  write access (the fix loop's trust rule). The review gate triages first:
+  findings that object to what the FR requires or excludes go into the review
+  notes instead of stopping. From the first FR through the container: the ask
+  sat in a session for an hour that nobody saw.
 - The PR facts carry whether auto-merge is enabled (`autoMergeRequest`).
 
 ### Changed

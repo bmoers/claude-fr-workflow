@@ -36,6 +36,8 @@ autopilot_effort: medium          # low | medium | high | xhigh | max
 autopilot_sessions: 3             # FR sessions the autopilot runs at a time
 session_permission_mode:          # auto | acceptEdits | dontAsk | default — --permission-mode of the sessions launch starts; empty = your default; never bypassPermissions
 notify_command:                   # run for every FR the autopilot reports as needing you, FR_MESSAGE etc. in the env, e.g. terminal-notifier -message "$FR_MESSAGE"; empty = nothing
+notify_repeat: 120                # minutes until a row that still needs you is sent again; 0 = once
+stop_comments: off                # on = a stop is also posted on the FR issue, and `accept all` / `fix 2` / `abort` as a comment answers it
 fix_loop: off                     # off | checks | checks+comments — what the autopilot sends back to a fix session
 fix_attempts: 2                   # fix sessions per FR, then it is reported
 fix_skip_checks: []               # checks that never go to the fix loop, e.g. [CodeQL, gitleaks]

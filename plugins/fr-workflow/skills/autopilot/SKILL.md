@@ -97,8 +97,10 @@ it once and keep waiting; the user acts, the pipeline changes, you go on. With
      the branch type comes from the FR issue's labels (`bug` → `fix`, else
      `feat`) instead of asking; and when step 2 finds that the code moved in
      the FR's areas since its definition, or `based_on` cannot be checked, do
-     not start — `fr.sh project-status <issue> input` and report it: the user
-     decides with `/fr-workflow:start <ID>`. A worktree hook that fails (step
+     not start — `fr.sh project-status <issue> input` and report it (with
+     `stop_comments: on` also `fr.sh stop-comment <ID> input <file>` with the
+     reason, in the issue's language): the user decides with
+     `/fr-workflow:start <ID>`. A worktree hook that fails (step
      4.5, exit 6) ends this FR for now as that step says — `blocked setup`, no
      session; the pipeline reports it, `/fr-workflow:start <ID>` resumes it.
      Otherwise `fr.sh launch implement <ID>`.
