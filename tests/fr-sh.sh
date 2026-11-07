@@ -39,6 +39,7 @@ case "$*" in
   "api repos/"*"/deployments/"*"/statuses"*) answer "statuses-$(printf '%s' "$*" | sed -n 's#.*/deployments/\([0-9]*\)/statuses.*#\1#p')" ;;
   "api repos/"*"/commits/"*) [ ! -f "$STUB/commits-fails" ] || { echo "API rate limit exceeded" >&2; exit 1; }; answer "commit-$(printf '%s' "$*" | sed -n 's#.*/commits/\([0-9a-f]*\).*#\1#p' | cut -c1-7)" ;;
   "api repos/"*"/compare/"*) answer compare ;;
+  "api repos/"*"/collaborators/"*"/permission"*) l=$(printf '%s' "$*" | sed -n 's#.*/collaborators/\([^/]*\)/permission.*#\1#p'); [ ! -f "$STUB/perm-$l-fails" ] || { echo "API rate limit exceeded" >&2; exit 1; }; if [ -f "$STUB/perm-$l" ]; then cat "$STUB/perm-$l"; else echo "HTTP 404: Not Found" >&2; exit 1; fi ;;
   "api repos/"*) answer self ;;
   "project list"*) [ ! -f "$STUB/project-list-fails" ] || { echo "missing scope: project" >&2; exit 1; }; answer projects ;;
   "project item-add"*) [ ! -f "$STUB/item-add-fails" ] || { echo "could not resolve to a node with the global id" >&2; exit 1; } ;;
@@ -537,6 +538,7 @@ check "pipeline: launched ship, no event yet, lock alive, listed busy → shippi
 "$FR" project-status 72 approval >/dev/null 2>&1
 stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncheck\tbuild\tpass\ncomment\t1\tMEMBER\tboris\thttps://x/1\ncomment\t4102444800\tNONE\tstranger\thttps://x/2')"
 check "pipeline: green PR, only old or untrusted comments → waits for the merge" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	none	PR #92 waits for your merge"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub perm-boris write
 stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tCOLLABORATOR\tboris\thttps://x/3')"
 check "pipeline: a collaborator's new comment, fix_loop checks → report" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	report	PR #92: comments by boris (fix_loop: checks)"' "$("$FR" pipeline --no-fetch 2>&1)"
 printf -- '---\nautopilot_sessions: 2\nfix_loop: checks+comments\nfix_comment_bots: [claude[bot]]\n---\n' > .claude/workflow.md
@@ -556,6 +558,42 @@ stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tNONE\t
 check "pipeline: a user named like a listed bot is not trusted" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	none	PR #92 waits for your merge"' "$("$FR" pipeline --no-fetch 2>&1)"
 stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tNONE\tClaude[bot]\thttps://x/6')"
 check "pipeline: the bot form matches regardless of case" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	fix	PR #92: comments by Claude\[bot\], attempt 1/2"' "$("$FR" pipeline --no-fetch 2>&1)"
+# comment trust is GitHub's collaborator permission, not the association (0.7.1):
+# MEMBER is any member of the organization, COLLABORATOR may read only
+stub perm-reader read
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tMEMBER\treader\thttps://x/7')"
+check "pipeline: a MEMBER with read permission is not trusted" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	none	PR #92 waits for your merge"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tCOLLABORATOR\tnobody\thttps://x/8')"
+check "pipeline: a COLLABORATOR whose permission cannot be read (404) is not trusted" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	none	PR #92 waits for your merge"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub perm-admin admin
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tMEMBER\tadmin\thttps://x/9\ncomment\t4102444800\tMEMBER\tadmin\thttps://x/10')"
+check "pipeline: a MEMBER with admin permission is trusted, looked up once for two comments" 'n0=$(grep -c "collaborators/admin/permission" "$STUB_LOG"); "$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	fix	PR #92: comments by admin, attempt 1/2" && [ "$(( $(grep -c "collaborators/admin/permission" "$STUB_LOG") - n0 ))" = 1 ]' "$(grep -c "collaborators/admin/permission" "$STUB_LOG") lookups so far"
+PERMCACHE="$(git rev-parse --git-common-dir)/fr-workflow/perm.cache"
+check "pipeline: the next tick takes the permission from the state dir's cache, no lookup" 'n0=$(grep -c "collaborators/admin/permission" "$STUB_LOG"); "$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	fix	PR #92: comments by admin" && [ "$(grep -c "collaborators/admin/permission" "$STUB_LOG")" = "$n0" ] && grep -q "^acme/ap	admin	admin	" "$PERMCACHE"' "$(cat "$PERMCACHE")"
+sub "s/^\(acme\/ap\tadmin\tadmin\t\).*/\11/" "$PERMCACHE"
+check "pipeline: a cache entry older than PERM_TTL is looked up again" 'n0=$(grep -c "collaborators/admin/permission" "$STUB_LOG"); "$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	fix	PR #92: comments by admin" && [ "$(( $(grep -c "collaborators/admin/permission" "$STUB_LOG") - n0 ))" = 1 ]' "$(cat "$PERMCACHE")"
+touch "$STUB/perm-limited-fails"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tMEMBER\tlimited\thttps://x/16')"
+"$FR" pipeline --no-fetch > "$SP/p.out" 2> "$SP/p.err"
+check "pipeline: a lookup that fails (rate limit) trusts nobody, says so on stderr and caches nothing" 'grep -q "^FR-72	review	none	PR #92 waits for your merge" "$SP/p.out" && grep -q "cannot read the permission of limited in acme/ap.*rate limit" "$SP/p.err" && ! grep -q "limited" "$PERMCACHE"' "$(cat "$SP/p.out" "$SP/p.err")"
+stub perm-ghost null
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tCOLLABORATOR\tghost\thttps://x/17')"
+"$FR" pipeline --no-fetch > "$SP/p.out" 2> "$SP/p.err"
+check "pipeline: a null permission is no permission, nothing on stderr, nothing cached" 'grep -q "^FR-72	review	none	PR #92 waits for your merge" "$SP/p.out" && [ ! -s "$SP/p.err" ] && ! grep -q "ghost" "$PERMCACHE"' "$(cat "$SP/p.out" "$SP/p.err")"
+stub perm-driveby write
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tCONTRIBUTOR\tdriveby\thttps://x/11')"
+check "pipeline: NONE/CONTRIBUTOR authors are never looked up — they cannot have write access" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	none	PR #92 waits for your merge" && ! grep -q "collaborators/driveby/permission" "$STUB_LOG"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tOWNER\tacme-owner\thttps://x/12')"
+check "pipeline: the repository's OWNER is trusted without a lookup" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	fix	PR #92: comments by acme-owner, attempt 1/2" && ! grep -q "collaborators/acme-owner/permission" "$STUB_LOG"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tMEMBER\t../x\thttps://x/13')"
+check "pipeline: a login that is not a GitHub login is neither trusted nor looked up" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	none	PR #92 waits for your merge" && ! grep -q "collaborators/\.\./x/permission" "$STUB_LOG"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub perm-emu_user write
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tMEMBER\temu_user\thttps://x/18')"
+check "pipeline: an Enterprise Managed User login with an underscore is looked up and trusted" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	fix	PR #92: comments by emu_user, attempt 1/2"' "$("$FR" pipeline --no-fetch 2>&1)"
+stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tBLOCKED\ncomment\t4102444800\tMEMBER\treader\thttps://x/14\ncomment\t4102444800\tMEMBER\tadmin\thttps://x/15')"
+"$FR" fix-brief 72 > "$SP/fb.out" 2>&1
+check "fix-brief: lists the comment of the admin, not the reader's" 'grep -q "^comment by admin: https://x/15" "$SP/fb.out" && ! grep -q "reader" "$SP/fb.out"' "$(cat "$SP/fb.out")"
+rm -f "$STUB"/perm-* "$PERMCACHE"
 stub prview "$(printf 'pr\tOPEN\tCONFLICTING\tDIRTY')"
 check "pipeline: a conflicting PR → ship again" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-72	review	ship	PR #92 conflicts"' "$("$FR" pipeline --no-fetch 2>&1)"
 stub prview "$(printf 'pr\tCLOSED\tUNKNOWN\tUNKNOWN')"

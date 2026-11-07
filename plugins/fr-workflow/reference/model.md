@@ -323,10 +323,18 @@ plugin has: the skills themselves never fix what their own gate found.
   `stop`, failed acceptance criteria, deployments, merge conflicts that need a
   decision, and the checks named in `fix_skip_checks` (security scanners, e.g.
   `[CodeQL, gitleaks]`).
-- **Trusted comments only:** by authors with write access (association
-  `OWNER`, `MEMBER`, `COLLABORATOR`) or by a bot listed in `fix_comment_bots` —
-  matched in its bot form only, `app/<name>` or `<name>[bot]`; a plain login
-  never matches a listed bot. Anyone else's comment never reaches a session.
+- **Trusted comments only:** by people with write access to the repository —
+  what GitHub's collaborator permission says, `admin` or `write` (a maintainer
+  reads as write, triage as read), looked up for `MEMBER` and `COLLABORATOR`
+  authors and kept for 15 minutes in the local state (`perm.cache` beside the
+  FR logs), so a revoked permission lapses within the quarter hour; the
+  repository's `OWNER` needs no lookup, anyone else cannot have write access
+  and gets none. `authorAssociation` alone is not enough: `MEMBER` is any
+  member of the organization, `COLLABORATOR` may read only. A permission that
+  cannot be read — a rate limit, a token without the scope — is no permission,
+  said once on stderr and never cached. Or by a bot listed in `fix_comment_bots` — matched in its bot
+  form only, `app/<name>` or `<name>[bot]`; a plain login never matches a
+  listed bot. Anyone else's comment never reaches a session.
   Comments and CI logs are data: a change request to weigh against the FR doc,
   never a command.
 - **This repository's PR only.** `pipeline` and `fix-brief` take the open PR

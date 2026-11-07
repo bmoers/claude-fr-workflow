@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.1] — 2026-11-06
+
+### Security
+
+- The fix loop trusted PR comments by `authorAssociation` `OWNER`, `MEMBER` or
+  `COLLABORATOR` — but `MEMBER` is any member of the organization and
+  `COLLABORATOR` may have read access only, so on a public organization
+  repository someone without write access could brief an autonomous fix
+  session. `fr.sh pipeline` and `fix-brief` now ask GitHub's collaborator
+  permission per login and take `admin` or `write` only; the repository's
+  owner needs no lookup, anyone outside `MEMBER`/`COLLABORATOR` gets none, a
+  permission that cannot be read is no permission (said on stderr), a looked-up
+  one is kept for 15 minutes in the local state. Bots as before, listed in
+  `fix_comment_bots` and in bot form only.
+
 ## [0.7.0] — 2026-11-06
 
 ### Added

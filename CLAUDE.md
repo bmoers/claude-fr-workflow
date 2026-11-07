@@ -105,9 +105,12 @@ pitfalls that the code does not show.
   implementation session per attempt (the session that judges is still never
   the one that wrote the code), a full new ship after every fix. Never in the
   loop: secrets, security findings, review findings under `stop`, acceptance,
-  deployments, conflicts, `fix_skip_checks`. PR comments only from
-  `OWNER`/`MEMBER`/`COLLABORATOR` or listed bots, since on a public repository
-  comments are an injection channel. The skills' own gates still never fix.
+  deployments, conflicts, `fix_skip_checks`. PR comments only from people
+  whose collaborator permission is `admin` or `write`, or from listed bots,
+  since on a public repository comments are an injection channel —
+  `authorAssociation` alone is not enough (0.7.1): `MEMBER` is any member of
+  the organization, `COLLABORATOR` may read only. The skills' own gates still
+  never fix.
 - **Deployment signal** (0.7.0): `deploy_signal: deployment` reads GitHub's
   Deployment records through `fr.sh deployment`, never creates one. Which
   commit is "this PR's" — the head, or a merge commit of it whose other parent
@@ -225,7 +228,8 @@ a new session there.
   (`worktree_setup` / `worktree_teardown`, `fr.sh hook`) · 0.6 autopilot,
   opt-in fix loop · 0.7.0 deployment signal (`deploy_signal: deployment`,
   `acceptance_label`), `notify_command`, spec model (`spec_dir`, spec deltas,
-  `fr.sh validate|fingerprint|fold`). Details:
+  `fr.sh validate|fingerprint|fold`) · 0.7.1 comment trust by collaborator
+  permission. Details:
   [CHANGELOG.md](CHANGELOG.md).
 - Before 0.3.0, three `/code-review` rounds found 37, 23 and 19 issues. Recurring
   bug classes: `set -e` exit codes, git path quoting, ref normalization, branch

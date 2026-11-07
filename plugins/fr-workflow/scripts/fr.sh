@@ -1672,18 +1672,61 @@ failing_checks() {
     $1 == "check" && $3 == "fail" { print ((tolower($2) in S) ? "skip" : "fix") "\t" $2 }'
 }
 
-# Comments after <epoch> by someone with write access to the repository, or by
-# a bot named in fix_comment_bots: "login<TAB>url". Everyone else's comment is
-# ignored — it is never an instruction to a session.
+# Comments after <epoch> that may brief a fix session: "login<TAB>url". From
+# people with write access to the repository, as GitHub's collaborator
+# permission says (admin or write; a maintainer reads as write, triage as
+# read). authorAssociation alone is not enough: MEMBER is any member of the
+# organization, COLLABORATOR may have read access only. The repository's OWNER
+# needs no lookup; NONE, CONTRIBUTOR and first-timers cannot have write access
+# and get none. One lookup per login, kept for PERM_TTL seconds in the state
+# dir's perm.cache — the pipeline asks every tick for every FR with such
+# comments, and a revoked permission still lapses within the quarter hour. A
+# permission that cannot be read — a rate limit, a token without the scope —
+# is no permission, said once on stderr, never cached. A bot counts only when
+# listed in fix_comment_bots, in bot form. Everyone else's comment is ignored
+# — it is never an instruction to a session.
+PERM_TTL=900
 trusted_comments() { # <epoch>  (PR facts on stdin)
+  local repo verdict login url perm out cache now seen=" "
+  repo=$(cur_repo); cache="$(state_dir)/perm.cache"; now=$(date +%s)
   awk -F '\t' -v since="$1" -v bots="$(cfg_list fix_comment_bots | tr '\n' '\037')" '
     function bare(x) { x = tolower(x); sub(/^app\//, "", x); sub(/\[bot\]$/, "", x); return x }
     # an author counts as a listed bot only in bot form, app/<name> or
     # <name>[bot]: a plain login never matches, whatever it is called
     function isbot(x) { x = tolower(x); return x ~ /^app\// || x ~ /\[bot\]$/ }
     BEGIN { n = split(bots, b, "\037"); for (i = 1; i <= n; i++) if (b[i] != "") B[bare(b[i])] = 1 }
-    $1 == "comment" && $2 + 0 > since + 0 &&
-      ($3 == "OWNER" || $3 == "MEMBER" || $3 == "COLLABORATOR" || (isbot($4) && (bare($4) in B))) { print $4 "\t" $5 }'
+    $1 == "comment" && $2 + 0 > since + 0 {
+      if ($3 == "OWNER" || (isbot($4) && (bare($4) in B))) print "yes\t" $4 "\t" $5
+      else if (($3 == "MEMBER" || $3 == "COLLABORATOR") && $4 ~ /^[A-Za-z0-9_-]+$/) print "ask\t" $4 "\t" $5
+    }' |
+  while IFS=$'\t' read -r verdict login url; do
+    if [ "$verdict" = ask ]; then
+      case "$seen" in
+        *" $login=yes "*) ;;
+        *" $login=no "*) continue ;;
+        *)
+          # the cache first: repo, login, permission, time of the lookup
+          perm=$([ -f "$cache" ] && awk -F '\t' -v r="$repo" -v l="$login" -v now="$now" -v ttl="$PERM_TTL" \
+            '$1 == r && $2 == l && now - $4 < ttl { v = $3 } END { print v }' "$cache" || true)
+          if [ -z "$perm" ]; then
+            if out=$(gh api "repos/$repo/collaborators/$login/permission" --jq .permission 2>&1 </dev/null); then
+              case "$out" in
+                admin|write|read|none) perm=$out; printf '%s\t%s\t%s\t%s\n' "$repo" "$login" "$perm" "$now" >> "$cache" ;;
+                *) perm=none ;;   # null or something new: not write access, not worth keeping
+              esac
+            else
+              echo "fr.sh: cannot read the permission of $login in $repo — the comment is not trusted: $out" >&2
+              perm=none
+            fi
+          fi
+          case "$perm" in
+            admin|write) seen="$seen$login=yes " ;;
+            *) seen="$seen$login=no "; continue ;;
+          esac ;;
+      esac
+    fi
+    printf '%s\t%s\n' "$login" "$url"
+  done
 }
 
 # The verdict on a gate a fix session could address: "fix" or "report", and why
