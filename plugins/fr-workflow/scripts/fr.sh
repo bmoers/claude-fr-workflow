@@ -1132,8 +1132,10 @@ cmd_stop_comment() { # <ID> <gate> <body file>
 
 # A decision given as a comment on the FR issue: the newest comment after the
 # stop comment (or the last event) whose first line is a command, from a
-# trusted author. Prints "verb<TAB>items<TAB>login": accept|fix with `all` or
-# `1,3`, abort with `-`. Exit 4 when there is none — with --wait it looks
+# trusted author. Prints one line per clause, "verb<TAB>items<TAB>login":
+# accept|fix with `all` or `1,3`, abort with `-`; clauses are separated by
+# `;` or `and` — `fix 1; accept 2,3`. A line with any clause that is not a
+# command is no decision. Exit 4 when there is none — with --wait it looks
 # again every <s> seconds until one comes or --max <s> passed.
 cmd_decision() { # <ID> [--wait <s> [--max <s>]]
   [ $# -ge 1 ] || die "usage: fr.sh decision <ID> [--wait <s> [--max <s>]]"
@@ -1157,16 +1159,26 @@ cmd_decision() { # <ID> [--wait <s> [--max <s>]]
     found=$(gh issue view "$n" -R "$repo" --json comments \
       --jq '.comments[] | "comment\t\(.createdAt | fromdateiso8601)\t\(.authorAssociation)\t\(.author.login)\t\((.body | split("\n") | map(select(length > 0)) | .[0] // "") | gsub("[\t\r]"; " ") | .[0:120])"' 2>/dev/null </dev/null |
       trusted_comments "$since" |
-      awk -F '\t' '{
-        l = tolower($2); gsub(/^[ \t]+|[ \t]+$/, "", l)
-        sub(/^(\/fr(-workflow)?:?|fr:) */, "", l)
-        if (l ~ /^(accept|fix)( +all)?$/) { v = l; sub(/ .*/, "", v); print v "\tall\t" $1 }
-        else if (l ~ /^(accept|fix) +[0-9]+( *, *[0-9]+)*$/) { v = l; sub(/ .*/, "", v); it = l; sub(/^[a-z]+ +/, "", it); gsub(/ /, "", it); print v "\t" it "\t" $1 }
-        else if (l ~ /^abort$/) print "abort\t-\t" $1
-      }' | tail -n 1)
+      awk -F '\t' '
+        # one clause → "verb<TAB>items", or "" when it is no command
+        function clause(c,   v, it) {
+          gsub(/^[ \t]+|[ \t]+$/, "", c)
+          if (c ~ /^(accept|fix)( +all)?$/) { v = c; sub(/ .*/, "", v); return v "\tall" }
+          if (c ~ /^(accept|fix) +[0-9]+( *, *[0-9]+)*$/) { v = c; sub(/ .*/, "", v); it = c; sub(/^[a-z]+ +/, "", it); gsub(/ /, "", it); return v "\t" it }
+          if (c ~ /^abort$/) return "abort\t-"
+          return ""
+        }
+        {
+          l = tolower($2); gsub(/^[ \t]+|[ \t]+$/, "", l)
+          sub(/^(\/fr(-workflow)?:?|fr:) */, "", l)
+          gsub(/ +and +/, ";", l)
+          n = split(l, cs, ";"); out = ""
+          for (i = 1; i <= n; i++) { r = clause(cs[i]); if (r == "") { out = ""; break }; out = out r "\t" $1 "\n" }
+          if (out != "") last = out
+        }
+        END { printf "%s", last }')
     if [ -n "$found" ]; then
-      verb=$(printf '%s' "$found" | cut -f1); items=$(printf '%s' "$found" | cut -f2); login=$(printf '%s' "$found" | cut -f3)
-      log_line "$id" "decision $verb $items by $login"
+      printf '%s\n' "$found" | while IFS=$'\t' read -r verb items login; do log_line "$id" "decision $verb $items by $login"; done
       printf '%s\n' "$found"; return 0
     fi
     [ -n "$wait" ] || { echo "fr.sh: no decision on $repo#$n yet" >&2; exit 4; }

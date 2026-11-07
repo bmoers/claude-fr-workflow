@@ -829,6 +829,11 @@ stub comments "$(printf 'comment\t%s\tOWNER\tboris\taccept all\ncomment\t%s\tNON
 check "decision: the newest trusted command after the stop comment, items normalised; older and untrusted ones ignored" '[ "$rc" = 0 ] && [ "$(cat "$SP/d.out")" = "$(printf "accept\t1,3\tboris")" ] && grep -q " decision accept 1,3 by boris$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-90.log"' "exit $rc: $(cat "$SP/d.out")"
 stub comments "$(printf 'comment\t%s\tOWNER\tboris\t/fr abort' "$((now + 20))")"
 check "decision: abort, with a /fr prefix" '[ "$("$FR" decision FR-90 2>/dev/null)" = "$(printf "abort\t-\tboris")" ]' "$("$FR" decision FR-90 2>&1)"
+stub comments "$(printf 'comment\t%s\tOWNER\tboris\tFix 1; accept 2, 4 and abort' "$((now + 20))")"
+check "decision: several clauses, separated by ; or and → one line each" '[ "$("$FR" decision FR-90 2>/dev/null)" = "$(printf "fix\t1\tboris\naccept\t2,4\tboris\nabort\t-\tboris")" ] && grep -q " decision accept 2,4 by boris$" "$(git rev-parse --git-common-dir)/fr-workflow/FR-90.log"' "$("$FR" decision FR-90 2>&1)"
+stub comments "$(printf 'comment\t%s\tOWNER\tboris\tfix 1; and then we see' "$((now + 20))")"
+"$FR" decision FR-90 > "$SP/d.out" 2>&1; rc=$?
+check "decision: a line with a clause that is no command is no decision" '[ "$rc" = 4 ]' "exit $rc: $(cat "$SP/d.out")"
 stub comments "$(printf 'comment\t%s\tOWNER\tboris\tlooks good, accept all of it' "$((now + 20))")"
 "$FR" decision FR-90 > "$SP/d.out" 2>&1; rc=$?
 check "decision: prose is no command → exit 4" '[ "$rc" = 4 ] && grep -q "no decision" "$SP/d.out"' "exit $rc: $(cat "$SP/d.out")"

@@ -323,7 +323,8 @@ minutes while the row stays.
 With `stop_comments: on` the stop is also on the FR issue, written by the
 session in the issue's language, so the board card itself says what is asked.
 The answer may then be a comment on that issue — `accept all`, `accept 1,3`,
-`fix 2`, `abort` as its first line, a `/fr` prefix allowed — from a person
+`fix 2`, `abort`, or several of those in one line separated by `;` (`fix 1;
+accept 2,3`) as its first line, a `/fr` prefix allowed — from a person
 GitHub's collaborator permission trusts (admin or write, as in the fix loop);
 the session picks it up within a minute and acts as if it had been said at the
 prompt. Joining the session still works. Note that a comment posted with your

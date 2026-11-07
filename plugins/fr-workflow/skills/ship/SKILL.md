@@ -75,11 +75,13 @@ decision the stop needs) and what you recommend — then
 assignees who are not the token's own login (one's own comment notifies
 nobody) and this machine's command to join this session. Exit 6 = not posted;
 say so and go on. Then **wait for the answer in the background**:
-`fr.sh decision <ID> --wait 60 --max 86400` returns `verb<TAB>items<TAB>login`
-as soon as someone with write access comments `accept all`, `accept 1,3`,
-`fix 2` or `abort` (first line of the comment, a `/fr` prefix allowed); act on
-it exactly as if that person had said it here, and name them in the review
-notes. Exit 4 after `--max` → end your turn with the ask in your report; the
+`fr.sh decision <ID> --wait 60 --max 86400` returns one line per clause,
+`verb<TAB>items<TAB>login`, as soon as someone with write access comments
+`accept all`, `accept 1,3`, `fix 2`, `abort`, or several of those in one line
+separated by `;` — `fix 1; accept 2,3` (first line of the comment, a `/fr`
+prefix allowed); act on it exactly as if that person had said it here, and
+name them in the review notes. Say in your stop comment that one line with
+`;` between the clauses decides everything at once. Exit 4 after `--max` → end your turn with the ask in your report; the
 user attaches or runs this skill again. A user who attaches may answer
 directly instead — then stop the background wait. Without `stop_comments`
 nothing changes: the ask is your report, the answer comes at the prompt.
