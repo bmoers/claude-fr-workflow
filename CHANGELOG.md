@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.8.0] — 2026-11-07
+## [0.8.0] — 2026-11-08
 
 For an autonomous factory: the board hands FRs to the autopilot, the ship
 session may hand the merge to GitHub, and the autopilot cleans up after it.
