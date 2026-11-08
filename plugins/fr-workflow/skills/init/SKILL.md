@@ -106,10 +106,14 @@ Also propose:
   agreed (existing options keep their id, colour and text). Needs `gh` 2.97 or
   newer wherever the commands run. Without the key GitHub's own workflows move
   the cards.
-  Tell the user to switch the project's *Auto-close issue* workflow off: it
-  closes the issue when Status reaches its chosen value, and with phases a
-  value like *Complete* is reached at `implemented`, mid-flight. The PR's
-  `Closes` closes the issue on merge.
+  `fr.sh project-options` also lists the board's workflows and warns when
+  *Auto-close issue* is on while an event before `done` maps to done's status
+  value — with phases *Complete* is reached at `implemented`, mid-flight, and
+  the workflow closes the FR issue. GitHub's API cannot switch a workflow, only
+  delete it: offer `fr.sh project-workflow auto-close off` and run it on the
+  user's word — the PR's `Closes` closes the issue on merge, *Item closed*
+  writes the done column. Everything else about workflows stays on the
+  *Workflows* page.
 
 Show the proposed profile and all open questions in one message. Typical ones:
 test environment URL and how to get in, test accounts (names or roles, never

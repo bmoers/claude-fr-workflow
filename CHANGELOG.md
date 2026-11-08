@@ -75,6 +75,12 @@ session may hand the merge to GitHub, and the autopilot cleans up after it.
   findings that object to what the FR requires or excludes go into the review
   notes instead of stopping. From the first FR through the container: the ask
   sat in a session for an hour that nobody saw.
+- **`fr.sh project-workflow auto-close off`** deletes the board's *Auto-close
+  issue* workflow — the one control GitHub's API gives over workflows (read
+  and delete; no switch, no settings). `fr.sh project-options` lists the
+  workflows and warns when *Auto-close issue* is on while an event before
+  `done` maps to done's status value: with phases that closed FR issues at
+  `implemented`, mid-ship, twice in the sandbox. `init` offers the removal.
 - `review_effort` (default `high`): the effort of `/code-review` in the ship
   session's review gate — `high` finds many small things, and under
   `review_gate: stop` each is a round for the person; `medium` for small FRs.

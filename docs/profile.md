@@ -177,7 +177,7 @@ one. With phases, a value like *Complete* is reached long before the end —
 issue while the FR is still being shipped (seen twice in the sandbox: closed
 seven seconds after `implemented`). Switch *Auto-close issue* off in the
 project's workflows: the PR's `Closes` closes the issue on merge, and `done`
-writes the final column. Or map `implemented` to nothing.
+writes the final column. Or map `implemented` to nothing. `fr.sh project-options` lists the board's workflows and warns about this; `fr.sh project-workflow auto-close off` removes the workflow — GitHub's API reads and deletes workflows, it cannot switch or configure them.
 
 ## Autopilot queue from the board
 

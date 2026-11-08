@@ -933,8 +933,54 @@ cmd_project_status() {
 # the page. Exit 5 = nothing changed, the reason on stderr.
 json_str() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
 
+# The project's workflows as "enabled<TAB>name<TAB>id" lines. GitHub's API reads
+# and deletes workflows, nothing else: no creating, no switch, no settings —
+# which value *Item added* or *Item closed* writes stays on the Workflows page.
+project_workflows() { # <owner>  (PROJ_NUM set)
+  gh api graphql -f query="{ repositoryOwner(login: $(json_str "$1")) { ... on ProjectV2Owner { projectV2(number: $PROJ_NUM) { workflows(first: 30) { nodes { id name enabled } } } } } }" \
+    --jq '.data.repositoryOwner.projectV2.workflows.nodes[] | "\(.enabled)\t\(.name)\t\(.id)"' 2>/dev/null </dev/null
+}
+
+# What the board's workflows mean for the profile: *Auto-close issue* knows
+# the status column only — with phases, an event before `done` that maps to
+# done's status value (`implemented=Building/Complete` beside
+# `done=Done/Complete`) closes the FR issue mid-flight. Printed by
+# project-options; the removal is `project-workflow auto-close off`.
+workflow_notes() { # <workflows>
+  local map done_v ev v early=""
+  map=$(cfg project_status "")
+  done_v=$(ps_value done "$map"); done_v=${done_v##*/}
+  if [ -n "$done_v" ]; then
+    for ev in $PS_EVENTS; do
+      [ "$ev" != done ] || continue
+      v=$(ps_value "$ev" "$map"); v=${v##*/}
+      [ "$v" != "$done_v" ] || early="$early${early:+, }$ev"
+    done
+  fi
+  printf '%s\n' "$1" | awk -F '\t' '{ printf "workflow %s: %s\n", ($1 == "true" ? "on " : "off"), $2 }'
+  if printf '%s\n' "$1" | grep -q "^true	Auto-close issue	" && [ -n "$early" ]; then
+    echo "WARNING: Auto-close issue is on and $early share(s) done's status value '$done_v' — it closes the FR issue before the merge. fr.sh project-workflow auto-close off removes it (the PR's Closes closes the issue at the merge)"
+  fi
+}
+
+cmd_project_workflow() { # auto-close off
+  [ "${1:-}" = auto-close ] && [ "${2:-}" = off ] || die "usage: fr.sh project-workflow auto-close off"
+  local title owner wf wid out
+  title=$(cfg project ""); [ -n "$title" ] || die "no project in the profile"
+  command -v gh >/dev/null || die "gh not found"
+  dr_init; owner=${DR%%/*}
+  project_lookup "$owner" "$title"
+  wf=$(project_workflows "$owner") || { echo "fr.sh: cannot read the workflows of '$title'" >&2; exit 5; }
+  wid=$(printf '%s\n' "$wf" | awk -F '\t' '$2 == "Auto-close issue" { print $3; exit }')
+  if [ -z "$wid" ]; then echo "project workflow: '$title' has no Auto-close issue workflow — nothing to do"; return 0; fi
+  if ! out=$(gh api graphql -f query="mutation { deleteProjectV2Workflow(input: { workflowId: $(json_str "$wid") }) { deletedWorkflowId } }" --jq .data.deleteProjectV2Workflow.deletedWorkflowId 2>&1 </dev/null); then
+    echo "fr.sh: Auto-close issue not removed from '$title' — $out" >&2; exit 5
+  fi
+  echo "project workflow: Auto-close issue removed from '$title' — GitHub's API has no switch for a workflow, only the delete; the PR's Closes closes the issue at the merge, Item closed writes the done column"
+}
+
 cmd_project_options() {
-  local title field owner values v q fid existing names missing keep new_json body out
+  local title field owner values v q fid existing names missing keep new_json body out wf
   local oid ocolor oname odesc
   title=$(cfg project "")
   [ -n "$title" ] || die "no project in the profile"
@@ -994,6 +1040,7 @@ EOF
   fi
   echo "project options: added $(printf '%s' "$missing" | paste -sd ',' - | sed 's/,/, /g') to '$field' of '$title' — now: $out"
   echo "workflows have no API — set them on $PROJ_URL/workflows: Item added to project → the 'defined' value, Item closed → the 'done' value, Auto-add to project with is:issue label:fr"
+  if wf=$(project_workflows "$owner") && [ -n "$wf" ]; then workflow_notes "$wf"; fi
 }
 
 # --- worktree hooks -----------------------------------------------------------
@@ -2558,6 +2605,7 @@ case "$cmd" in
   pr-commit) cmd_pr_commit "$@" ;;
   project-status) cmd_project_status "$@" ;;
   project-options) cmd_project_options "$@" ;;
+  project-workflow) cmd_project_workflow "$@" ;;
   queue) cmd_queue "$@" ;;
   pipeline) cmd_pipeline "$@" ;;
   launch) cmd_launch "$@" ;;

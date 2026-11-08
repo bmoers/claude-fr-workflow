@@ -55,6 +55,8 @@ case "$*" in
   "pr view"*) [ ! -f "$STUB/prview-fails" ] || exit 1; answer prview ;;
   "pr merge"*) [ ! -f "$STUB/merge-fails" ] || { echo "GraphQL: Pull request is not mergeable (enablePullRequestAutoMerge)" >&2; exit 1; }; echo "✓ Pull request $2 will be automatically merged" ;;
   "api graphql --paginate -f query="*) [ ! -f "$STUB/items-fails" ] || { echo "Could not resolve to a ProjectV2" >&2; exit 1; }; answer items ;;
+  "api graphql -f query="*"workflows(first"*) answer workflows ;;
+  "api graphql -f query=mutation { deleteProjectV2Workflow"*) answer deleted ;;
   "api graphql -f query="*) answer options ;;
   "api graphql --input -"*) cat > "$STUB/mutation.in"; [ ! -f "$STUB/mutation-fails" ] || { echo "Field 'singleSelectOptions' nope" >&2; exit 1; }; answer mutated ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 1 ;;
@@ -1309,6 +1311,22 @@ stub prview "$(printf 'pr\tOPEN\tMERGEABLE\tCLEAN\t-\ncheck\tbuild\tpass')"
 check "pipeline: without auto-merge the PR waits for the user" '"$FR" pipeline --no-fetch 2>/dev/null | grep -q "^FR-90	review	none	PR #5 waits for your merge"' "$("$FR" pipeline --no-fetch 2>&1)"
 "$FR" queue clear
 
+# project workflows: read-only notes at setup, and the one removal GitHub's API allows
+stub workflows "$(printf 'true\tItem added to project\tPWF_a\ntrue\tItem closed\tPWF_c\ntrue\tAuto-close issue\tPWF_x\ntrue\tAuto-add to project\tPWF_d')"
+stub options "$(printf 'PVTSSF_m8
+o1	GREEN	Ready	')"
+stub mutated "Ready, Running"
+"$FR" project-options Ready Running > "$SP/po.out" 2>&1; rc=$?
+check "project-options: lists the board's workflows and warns when Auto-close issue shares done's status value with an earlier event" '[ "$rc" = 0 ] && grep -q "^workflow on : Auto-close issue" "$SP/po.out" && grep -q "WARNING: Auto-close issue is on and implemented share(s) done.s status value .Complete." "$SP/po.out" && grep -q "fr.sh project-workflow auto-close off" "$SP/po.out"' "exit $rc: $(cat "$SP/po.out")"
+: > "$STUB_LOG"; stub deleted '{"data":{"deleteProjectV2Workflow":{"deletedWorkflowId":"PWF_x"}}}'
+"$FR" project-workflow auto-close off > "$SP/pw.out" 2>&1; rc=$?
+check "project-workflow auto-close off: deletes the Auto-close issue workflow by its id" '[ "$rc" = 0 ] && grep -q "deleteProjectV2Workflow(input: { workflowId: \"PWF_x\" })" "$STUB_LOG" && grep -q "Auto-close issue removed from .Product Factory." "$SP/pw.out"' "exit $rc: $(cat "$SP/pw.out" "$STUB_LOG")"
+stub workflows "$(printf 'true\tItem added to project\tPWF_a\ntrue\tItem closed\tPWF_c')"; : > "$STUB_LOG"
+"$FR" project-workflow auto-close off > "$SP/pw.out" 2>&1; rc=$?
+check "project-workflow auto-close off: nothing to do without the workflow, no mutation" '[ "$rc" = 0 ] && grep -q "nothing to do" "$SP/pw.out" && ! grep -q deleteProjectV2Workflow "$STUB_LOG"' "exit $rc: $(cat "$SP/pw.out")"
+"$FR" project-workflow auto-close on > "$SP/pw.out" 2>&1; rc=$?
+check "project-workflow: only auto-close off exists — GitHub's API has no switch" '[ "$rc" = 1 ] && grep -q usage "$SP/pw.out"' "exit $rc: $(cat "$SP/pw.out")"
+nostub workflows; nostub deleted; nostub options; nostub mutated
 # finish: after the merge — hook, worktree, local branch, board, queue
 git switch -q -c feat/fr-91-x origin/main
 fm FR-91 Ninety-one in-review "" "src/x" > req/feature-requests/FR-91-x.md
