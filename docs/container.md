@@ -24,6 +24,12 @@ subscription pays for the sessions, your GitHub login writes the commits and
 pull requests. Nothing about your project is inside the container image; it
 reads your repository's `.claude/workflow.md` like any developer's machine.
 
+![What runs where: the container on your laptop with entrypoint, Claude Code daemon and volume; GitHub, Anthropic and your chat channel on the right](img/container-architecture.svg)
+
+The five steps below take about fifteen minutes the first time:
+
+![From zero to the first FR: tokens, image, run, check, give it work](img/container-setup-steps.svg)
+
 ## Before you start
 
 - Docker Desktop or OrbStack is installed and running (`docker version`
@@ -31,7 +37,8 @@ reads your repository's `.claude/workflow.md` like any developer's machine.
 - The repository you want to run uses fr-workflow: it pins a plugin version
   in `.claude/settings.json` and has a profile `.claude/workflow.md` with
   `autopilot_queue: project`, so the board feeds the queue — see
-  [the profile reference](profile.md#autopilot-queue-from-the-board).
+  [the profile reference](profile.md#autopilot-queue-from-the-board) and
+  [setting up the board](board-setup.md).
 - The repository ignores `.claude/workflow.local.md` (`init` adds it to
   `.gitignore`); the container writes your per-machine values there.
 - You have a Claude subscription (Pro, Max, Ultra, Team or Enterprise) and
@@ -160,6 +167,8 @@ correct.
 ## Step 5 — Give it work
 
 Nothing in the container decides what to build. The board does:
+
+![An FR through the container: queue, start, implement, ship reviews, ship PR, finish — and the three places where you act](img/fr-through-container.svg)
 
 1. Define the FR as always, with `/fr-workflow:new` — the issue with the
    label `fr` lands on the board.

@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `docs/board-setup.md`: the reference board — Phase and Status with colours
+  and descriptions, the three views, the workflows — how to copy it as a
+  template (`copyProjectV2`), link the repository, and the handful of settings
+  GitHub's API cannot reach, as a checklist.
+- The container manual has figures: what runs where, the five steps from
+  zero to the first FR, and an FR's way through the container with the three
+  places where a person acts (`docs/img/`, plain SVG).
+
 ## [0.8.0] — 2026-11-08
 
 For an autonomous factory: the board hands FRs to the autopilot, the ship

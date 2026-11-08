@@ -170,6 +170,9 @@ owner of the issue repository — the organisation or user — like
 `gh issue create --project`. Keep GitHub's *Item closed* workflow on as the
 safety net for issues closed by hand.
 
+Setting a board up from scratch, or from a copy of the reference layout, is
+[its own page](board-setup.md).
+
 **GitHub's *Auto-close issue* workflow.** Projects ship a workflow that
 closes an issue when its Status reaches one chosen value, usually the "done"
 one. With phases, a value like *Complete* is reached long before the end —

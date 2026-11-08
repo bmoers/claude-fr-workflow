@@ -53,14 +53,15 @@ Details and an example: [usage](docs/usage.md#three-ways-to-run-it).
 
 ## Documentation
 
-| Page                                                      | For                                                                             |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [Installation](docs/installation.md)                      | setting up a repository, prerequisites for developers, updates, troubleshooting |
-| [Usage](docs/usage.md)                                    | the workflow step by step, with an example                                      |
-| [Profile reference](docs/profile.md)                      | every setting in `.claude/workflow.md`, choosing the deploy signal              |
-| [Container](docs/container.md)                            | running the autopilot without a terminal: the image, `docker run`, as a pod     |
-| [For issue authors](docs/for-issue-authors.md)            | customers and others who write issues — no technical knowledge needed           |
-| [Model and rules](plugins/fr-workflow/reference/model.md) | the data model and the hard rules every command follows                         |
+| Page                                                      | For                                                                                   |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [Installation](docs/installation.md)                      | setting up a repository, prerequisites for developers, updates, troubleshooting       |
+| [Usage](docs/usage.md)                                    | the workflow step by step, with an example                                            |
+| [Profile reference](docs/profile.md)                      | every setting in `.claude/workflow.md`, choosing the deploy signal                    |
+| [Container](docs/container.md)                            | running the autopilot without a terminal: the image, `docker run`, as a pod           |
+| [Board setup](docs/board-setup.md)                        | the reference board — fields, views, workflows — and the steps GitHub's API cannot do |
+| [For issue authors](docs/for-issue-authors.md)            | customers and others who write issues — no technical knowledge needed                 |
+| [Model and rules](plugins/fr-workflow/reference/model.md) | the data model and the hard rules every command follows                               |
 
 ## Design decisions
 
