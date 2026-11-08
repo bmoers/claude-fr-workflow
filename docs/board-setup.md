@@ -82,14 +82,25 @@ gh api graphql -f query='mutation { linkProjectV2ToRepository(input: { projectId
 GitHub's API reads a project's workflows (name, on/off) and deletes one;
 it cannot switch, configure or create them. So:
 
-| Workflow                                     | Setting                                                                      | How                                                                               |
-| -------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| *Auto-close issue*                           | **off** — with phases, *Complete* is reached at `implemented`, mid-ship      | `fr.sh project-workflow auto-close off` deletes it; `init` offers that            |
-| *Item added to project*                      | Phase `Backlog`, Status `Draft` — a new item is not ready by itself          | Workflows page, by hand (copied with the template)                                |
-| *Item closed*                                | Phase `Done`, Status `Complete` — the safety net for issues closed by hand   | Workflows page, by hand (copied with the template)                                |
-| *Pull request merged*                        | nothing, or `Review` / `Complete` — the merge alone is not done, `finish` is | Workflows page, by hand                                                           |
-| *Auto-add to project*                        | `is:issue label:fr` on the repository — FR issues someone creates by hand    | Workflows page, by hand: **not copied with a template**, create it after the link |
-| *Pull request linked*, *Auto-add sub-issues* | as they are                                                                  | —                                                                                 |
+| Workflow                       | Setting                                                                                                                                                  | How                                                                               |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| *Auto-close issue*             | **off** — with phases, *Complete* is reached at `implemented`, mid-ship                                                                                  | `fr.sh project-workflow auto-close off` deletes it; `init` offers that            |
+| *Item added to project*        | Status `Draft` — a new item is not ready by itself                                                                                                       | Workflows page, by hand (copied with the template)                                |
+| *Item closed*                  | Status `Complete` — the safety net for issues closed by hand; the phase stays                                                                            | Workflows page, by hand (copied with the template)                                |
+| *Pull request linked to issue* | Status `Running` in the template — the ship session opens the PR, and its event `shipping` writes the same status                                        | Workflows page, by hand (copied with the template)                                |
+| *Pull request merged*          | Status `Waiting for Input` in the template — until `finish` (`autopilot_finish`) or `done` writes `Done` / `Complete`; without them the card waits there | Workflows page, by hand (copied with the template)                                |
+| *Auto-add to project*          | `is:issue label:fr` on the repository — FR issues someone creates by hand                                                                                | Workflows page, by hand: **not copied with a template**, create it after the link |
+| *Auto-add sub-issues*          | as it is                                                                                                                                                 | —                                                                                 |
+
+A built-in workflow sets **one field, the Status** — not the Phase, not two
+fields at once ([GitHub's docs](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-built-in-automations)
+describe only the Status; the request for other fields is
+[open since 2023](https://github.com/orgs/community/discussions/72181)). So an
+item the *Auto-add* workflow brings has no phase until someone sets one; an
+FR issue `new` creates gets `Planning` / `Running` from the plugin right after
+it is added. *Item added* fires on that addition too and may write its
+`Draft` after the plugin: a fresh card showing *Draft* under *Planning* is
+that, and the move to *Building / Ready* by hand settles it.
 
 `fr.sh project-options` lists the workflows with on/off and warns when
 *Auto-close issue* is on while an event before `done` maps to done's status
@@ -112,6 +123,6 @@ What no command does, once per board:
 1. Create the *Auto-add to project* workflow with `is:issue label:fr` for the
    repository (and `label:fr-request` if requests go on the board too).
 2. Open *Item added to project* and *Item closed* and confirm the values
-   (`Backlog` / `Draft`, `Done` / `Complete`).
+   (Status `Draft`, Status `Complete` — a workflow cannot set the Phase).
 3. Add the *Needs me* view if the team wants one.
 4. Give the project a description.

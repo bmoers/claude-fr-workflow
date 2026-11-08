@@ -58,7 +58,7 @@ Details and an example: [usage](docs/usage.md#three-ways-to-run-it).
 | [Installation](docs/installation.md)                      | setting up a repository, prerequisites for developers, updates, troubleshooting       |
 | [Usage](docs/usage.md)                                    | the workflow step by step, with an example                                            |
 | [Profile reference](docs/profile.md)                      | every setting in `.claude/workflow.md`, choosing the deploy signal                    |
-| [Container](docs/container.md)                            | running the autopilot without a terminal: the image, `docker run`, as a pod           |
+| [Container](docs/container.md)                            | running the autopilot without a terminal: the image, Compose, as a pod                |
 | [Board setup](docs/board-setup.md)                        | the reference board — fields, views, workflows — and the steps GitHub's API cannot do |
 | [For issue authors](docs/for-issue-authors.md)            | customers and others who write issues — no technical knowledge needed                 |
 | [Model and rules](plugins/fr-workflow/reference/model.md) | the data model and the hard rules every command follows                               |
@@ -118,7 +118,7 @@ plugins/fr-workflow/
   reference/model.md                model and rules, read by every command
   scripts/fr.sh                     deterministic part: FR list, FR doc from the issue, FRs of a request, overlap, lock, board status, worktree hooks, autopilot pipeline and launches
   templates/                        FR issue, profile, issue form, FR folder README
-docker/                             the autopilot container: Dockerfile and entrypoint (docs/container.md)
+docker/                             the autopilot container: Dockerfile, entrypoint, compose.yml (docs/container.md)
 .github/workflows/image.yml         builds and publishes the container image on release tags
 docs/                               user documentation
 tests/fr-sh.sh                      regression suite for scripts/fr.sh

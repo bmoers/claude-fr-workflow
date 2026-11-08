@@ -1,0 +1,31 @@
+# The fr-workflow autopilot as a Compose service — step 3 of docs/container.md.
+#
+# Copy this file next to your env file, outside any repository — for example
+# into ~/.config/fr-autopilot/ — set the image tag your repository pins and
+# REPO, and in that folder run:
+#
+#   docker compose up -d                       start; also after a change to this file
+#   docker compose logs -f                     the entrypoint's log
+#   docker compose down                        stop and remove the container; the volume stays
+#   docker compose run --rm autopilot check    the smoke test, without starting the service
+#
+# The container has a fixed name, so every `docker exec fr-autopilot …` in the
+# manual works as written. No token lives in this file: both stay in the env
+# file.
+
+services:
+  autopilot:
+    image: ghcr.io/bmoers/fr-workflow-autopilot:v0.8.0   # the tag your repository pins
+    container_name: fr-autopilot
+    restart: unless-stopped
+    env_file: ./fr-autopilot.env       # CLAUDE_CODE_OAUTH_TOKEN and GH_TOKEN; chmod 600
+    environment:
+      REPO: acme/shop                  # the repository, owner/name on GitHub
+      ATTACH_CONTAINER: fr-autopilot   # the attach command in notifications names the container
+      # AUTOPILOT_ASSIGNEE: none       # this container takes the unassigned FRs instead
+    volumes:
+      - fr-autopilot:/home/pwuser      # clone, Claude Code's state, the plugin — survives restarts
+
+volumes:
+  fr-autopilot:
+    name: fr-autopilot                 # otherwise Compose prefixes it with the folder's name

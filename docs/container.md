@@ -47,8 +47,13 @@ The five steps below take about fifteen minutes the first time:
 ## Step 1 — Create your two tokens
 
 The container cannot open a browser to log in, so it needs two tokens from
-you. Put them into one file that only you can read. Pick a path outside any
-repository, for example `~/.config/fr-autopilot.env`.
+you. Put them into one file that only you can read, in a folder outside any
+repository — the Compose file of step 3 goes into the same folder. This
+manual uses `~/.config/fr-autopilot/fr-autopilot.env`:
+
+```bash
+mkdir -p ~/.config/fr-autopilot && chmod 700 ~/.config/fr-autopilot
+```
 
 **Claude token.** In a terminal, run:
 
@@ -70,8 +75,8 @@ Make sure it has the scopes the autopilot needs, then append it:
 
 ```bash
 gh auth refresh -s repo,workflow,project,read:org
-printf 'GH_TOKEN=%s\n' "$(gh auth token)" >> ~/.config/fr-autopilot.env
-chmod 600 ~/.config/fr-autopilot.env
+printf 'GH_TOKEN=%s\n' "$(gh auth token)" >> ~/.config/fr-autopilot/fr-autopilot.env
+chmod 600 ~/.config/fr-autopilot/fr-autopilot.env
 ```
 
 If you prefer a separate token, create a classic personal access token at
@@ -103,32 +108,63 @@ The image is about 3 GB; the browser is most of it.
 
 ## Step 3 — Start the container
 
+The container runs as a Compose service: one file names the image, the
+repository and where the state lives, and `docker compose` starts, stops and
+updates it. Copy [`docker/compose.yml`](../docker/compose.yml) into the
+folder with your env file:
+
 ```bash
-docker run -d --name fr-autopilot --restart unless-stopped \
-  -v fr-autopilot:/home/pwuser \
-  --env-file ~/.config/fr-autopilot.env \
-  -e REPO=acme/shop \
-  ghcr.io/bmoers/fr-workflow-autopilot:v0.8.0
+cd ~/.config/fr-autopilot
+curl -fsSLO https://raw.githubusercontent.com/bmoers/claude-fr-workflow/main/docker/compose.yml
+```
+
+Open it and set two lines — the image tag your repository pins and `REPO`:
+
+```yaml
+services:
+  autopilot:
+    image: ghcr.io/bmoers/fr-workflow-autopilot:v0.8.0   # the tag your repository pins
+    container_name: fr-autopilot
+    restart: unless-stopped
+    env_file: ./fr-autopilot.env
+    environment:
+      REPO: acme/shop                  # the repository, owner/name on GitHub
+      ATTACH_CONTAINER: fr-autopilot
+    volumes:
+      - fr-autopilot:/home/pwuser
+volumes:
+  fr-autopilot:
+    name: fr-autopilot
+```
+
+Then start it:
+
+```bash
+docker compose up -d
 ```
 
 What the parts mean:
 
-| Part                           | Meaning                                                                                                                           |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `-d --name fr-autopilot`       | runs in the background under this name                                                                                            |
-| `--restart unless-stopped`     | Docker starts it again after a reboot, unless you stopped it yourself                                                             |
-| `-v fr-autopilot:/home/pwuser` | a Docker volume for everything that must survive a restart: the clone, Claude Code's state, the plugin. Named after the container |
-| `--env-file …`                 | your two tokens                                                                                                                   |
-| `-e REPO=acme/shop`            | the repository, as `owner/name` on GitHub                                                                                         |
+| Part                      | Meaning                                                                                                                                                                                   |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `image`                   | the image from step 2                                                                                                                                                                     |
+| `container_name`          | the fixed name `fr-autopilot` — every command in this manual uses it, from any folder                                                                                                     |
+| `restart: unless-stopped` | Docker starts it again after a reboot, unless you stopped it yourself                                                                                                                     |
+| `env_file`                | your two tokens, the file from step 1 beside this one                                                                                                                                     |
+| `REPO`                    | the repository, as `owner/name` on GitHub                                                                                                                                                 |
+| `ATTACH_CONTAINER`        | the name the attach command in notifications and stop comments uses — the container's name, so the command works as pasted                                                                |
+| `volumes`                 | a Docker volume for everything that must survive a restart: the clone, Claude Code's state, the plugin. `name:` keeps it `fr-autopilot`; Compose would otherwise prefix the folder's name |
 
 By default the container takes the FRs assigned to the GitHub login behind
 `GH_TOKEN`. To run it for a different login, or for the unassigned FRs, add
-`-e AUTOPILOT_ASSIGNEE=<login>` or `-e AUTOPILOT_ASSIGNEE=none`.
+`AUTOPILOT_ASSIGNEE: <login>` or `AUTOPILOT_ASSIGNEE: none` under
+`environment`. The same as a single command, without Compose, is in the
+[reference](#without-compose).
 
 ## Step 4 — Check that it works
 
 ```bash
-docker logs -f fr-autopilot
+docker logs -f fr-autopilot        # or, in the folder with the Compose file: docker compose logs -f
 ```
 
 Within about half a minute you should see lines like these, then nothing
@@ -191,8 +227,8 @@ You see progress in three places: the board, the pull request, and
 a gate that stopped, a question — is reported by the autopilot; the profile's
 `notify_command` sends it to your channel with the command to join the
 session, copy-ready for your laptop (the container writes `attach_command`
-for that; name the container with `ATTACH_CONTAINER=fr-autopilot` so the
-command uses the name instead of the id). Point `notify_command` at a webhook
+for that, with the name `ATTACH_CONTAINER` gives it — the Compose file sets
+it). Point `notify_command` at a webhook
 or a chat; a desktop notifier has no desktop inside a container. With
 `stop_comments: on` in the profile the ask is also on the FR issue, and you
 answer with a comment: `accept all`, `accept 1,3`, `fix 2` or `abort`. A
@@ -213,6 +249,10 @@ push, the issue the record.
 | remove it, keep the state         | `docker rm fr-autopilot` — the volume stays                      |
 | remove the state too              | `docker volume rm fr-autopilot`                                  |
 
+In the folder with the Compose file the same reads `docker compose logs -f`,
+`docker compose stop`, `docker compose start` and `docker compose down`
+(removes the container, keeps the volume).
+
 Two things to know when you attach: quitting the attached session ends it.
 For the autopilot that is harmless — the keep-alive starts a fresh one within
 five minutes — but an implementation or ship session you quit is gone, and
@@ -232,16 +272,17 @@ moves to `v0.9.0`:
 
 1. Wait until no FR of this container is in flight (board: nothing of yours
    on *Running*).
-2. `docker rm -f fr-autopilot` and `docker volume rm fr-autopilot` — the
+2. `docker compose down` and `docker volume rm fr-autopilot` — the
    container registered the old plugin version, and a fresh volume is the
    clean way to forget it.
-3. Start it again as in step 3 with the new image tag.
+3. Set the new tag in `compose.yml` and `docker compose up -d` — Compose
+   pulls an image it does not have.
 
 ## Troubleshooting
 
 | What you see                                                         | Cause                                                                                                                                 | Fix                                                                                                    |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `fr-autopilot: GH_TOKEN is not set` (or `REPO`, or the Claude token) | the env file lacks it, or `--env-file` points elsewhere                                                                               | check the file: `grep -c = ~/.config/fr-autopilot.env` shows 2                                         |
+| `fr-autopilot: GH_TOKEN is not set` (or `REPO`, or the Claude token) | the env file lacks it, or `env_file` points elsewhere                                                                                 | check the file: `grep -c = ~/.config/fr-autopilot/fr-autopilot.env` shows 2                            |
 | `fr-autopilot: GH_TOKEN is not accepted by GitHub`                   | the token is wrong, expired, or not authorised for the organisation (SSO)                                                             | `gh auth refresh`, then write the token again                                                          |
 | `fr-autopilot: CLAUDE_CODE_OAUTH_TOKEN is not accepted`              | the token is wrong or revoked                                                                                                         | `claude setup-token` again                                                                             |
 | `warning: … does not ignore .claude/workflow.local.md`               | the repository's `.gitignore` lacks the entry                                                                                         | add it (a `/fr-workflow:init` run proposes it); until then the profile's `autopilot_assignee` applies  |
@@ -296,11 +337,36 @@ the commit, never a moving `latest`. Pushes and pull requests that touch
 | `AUTO_MODE_ENVIRONMENT`   | —        | extra lines for the classifier's `autoMode.environment`, one per line, written once                                                                                                            |
 
 Commands: `run` (default) prepares and loops; `once` prepares, launches once
-and exits; `check` prepares and runs `fr.sh check` — the smoke test:
+and exits; `check` prepares and runs `fr.sh check` — the smoke test, in the
+folder with the Compose file:
 
 ```bash
-docker run --rm -v fr-autopilot:/home/pwuser --env-file … -e REPO=acme/shop ghcr.io/bmoers/fr-workflow-autopilot:v0.8.0 check
+docker compose run --rm autopilot check
 ```
+
+### Without Compose
+
+The Compose file is five flags of `docker run`; the same container by hand:
+
+```bash
+docker run -d --name fr-autopilot --restart unless-stopped \
+  -v fr-autopilot:/home/pwuser \
+  --env-file ~/.config/fr-autopilot/fr-autopilot.env \
+  -e REPO=acme/shop -e ATTACH_CONTAINER=fr-autopilot \
+  ghcr.io/bmoers/fr-workflow-autopilot:v0.8.0
+```
+
+| Part                           | Meaning                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `-d --name fr-autopilot`       | runs in the background under this name                                                            |
+| `--restart unless-stopped`     | Docker starts it again after a reboot, unless you stopped it yourself                             |
+| `-v fr-autopilot:/home/pwuser` | the volume for everything that must survive a restart: the clone, Claude Code's state, the plugin |
+| `--env-file …`                 | your two tokens                                                                                   |
+| `-e REPO=acme/shop`            | the repository, as `owner/name` on GitHub                                                         |
+| `-e ATTACH_CONTAINER=…`        | the name the attach command in notifications uses; without it, the container id                   |
+
+The smoke test is the same command with `--rm` instead of `-d --name …` and
+`check` at the end.
 
 ### What the entrypoint does
 

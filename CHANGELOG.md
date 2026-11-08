@@ -11,6 +11,17 @@
 - The container manual has figures: what runs where, the five steps from
   zero to the first FR, and an FR's way through the container with the three
   places where a person acts (`docs/img/`, plain SVG).
+- `docker/compose.yml`: the container as a Compose service — image, fixed
+  name, restart policy, env file and volume in one file beside the tokens;
+  the manual's step 3 is `docker compose up -d`, the `docker run` form moved
+  to the reference.
+
+### Changed
+
+- `docs/board-setup.md`: a built-in project workflow sets the Status only —
+  *Item added* and *Item closed* cannot set the Phase; the template's *Pull
+  request linked* (`Running`) and *Pull request merged* (`Waiting for Input`)
+  values and how the plugin's writes relate to them.
 
 ## [0.8.0] — 2026-11-08
 

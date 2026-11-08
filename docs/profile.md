@@ -162,7 +162,9 @@ project* → your `defined` value, or a column for requests such as *Backlog*
 when they are on the board too (`fr.sh project-options Backlog` adds it; FR
 issues leave it as soon as `new` writes the `defined` value), *Item closed* →
 your `done` value, *Auto-add to project* with `is:issue label:fr` — or
-`is:issue label:fr,fr-request` to add requests as well. Writing the board is best effort: a `gh` older than 2.97, a missing
+`is:issue label:fr,fr-request` to add requests as well. A workflow sets one
+field, the Status: with phases, the status part of the value; the phase stays
+— see [board setup](board-setup.md#3-workflows--what-the-api-can-and-cannot-do). Writing the board is best effort: a `gh` older than 2.97, a missing
 `project` scope (`gh auth refresh -s project`), a title that does not match
 (`gh project list --owner <owner>`; case does not matter) or an unknown value
 is reported by the command and never stops it. The project must belong to the
